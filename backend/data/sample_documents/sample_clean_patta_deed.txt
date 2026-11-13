@@ -1,0 +1,29 @@
+GOVERNMENT OF TELANGANA - REVENUE DEPARTMENT (SYNTHETIC SAMPLE)
+DHARANI PATTA PASSBOOK & TITLE DEED EXTRACT
+Passbook Number: T-DHRN-101928-MOCK
+Status: DEMONSTRATION RECORD - NOT AN OFFICIAL GOVERNMENT DOCUMENT
+
+1. LAND PARTICULARS:
+   District: Ranga Reddy
+   Mandal: Chevella
+   Village: Pamena
+   Survey Number: SY-101/MOCK
+   Total Extent: 10 Acres 00 Guntas
+   Soil Classification: Dry Agricultural (Red Soil)
+
+2. KHATADAR / OWNER DETAILS:
+   Name of Pattadar: K. Raghava Rao
+   Father's Name: K. Venkataiah
+   Nature of Ownership: Ancestral Self-Acquired & Partition Registered (Doc No. 1420/2005, SRO Chevella)
+
+3. ENCUMBRANCE RECORD & LIEN STATUS:
+   Period Examined: 01-01-1994 to Present (30 Years)
+   Mortgages Registered: NIL
+   Court Injunctions: NIL
+   Government Prohibited Property List (22-A): NOT LISTED (Freehold Private Property)
+   Telangana Agricultural Land Ceiling: Within permissible holding limits
+
+4. REVENUE CERTIFICATION:
+   Tahsildar Digital Signatory Token: VERIFIED-MOCK-HASH-9921
+   Taxes Paid up to assessment year: 2024-2025
+   Mutation Order: Passed vide proceedings D/112/2006

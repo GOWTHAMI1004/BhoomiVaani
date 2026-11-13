@@ -1,0 +1,262 @@
+[
+  {
+    "id": "bv-hyd-01",
+    "title": "Sri Venkateshwara Farm Groves",
+    "location": "Chevella",
+    "district": "Ranga Reddy",
+    "survey_number": "SY-101/MOCK",
+    "acres": 10.0,
+    "price_per_acre_lakhs": 42.0,
+    "total_price_lakhs": 420.0,
+    "land_type": "Agricultural - Red Soil",
+    "legal_status": "Clean Title Verified",
+    "legal_risks": [],
+    "upcoming_projects": [
+      "Regional Ring Road (RRR) Southern Section",
+      "Chevella-Vikarabad 4-Lane Widening"
+    ],
+    "infrastructure_evidence": [
+      {
+        "claim": "Regional Ring Road (RRR) Southern Section",
+        "status": "Officially announced",
+        "evidence_source": "NHAI Gazette Notification S.O. 2341(E) (Synthetic demo reference)",
+        "distance_km": 4.5,
+        "confidence": "High"
+      },
+      {
+        "claim": "Chevella-Vikarabad 4-Lane Highway Expansion",
+        "status": "Under construction",
+        "evidence_source": "Telangana R&B Department Tender Ref RNB/2024/MOCK",
+        "distance_km": 1.2,
+        "confidence": "High"
+      },
+      {
+        "claim": "Direct Metro Rail Link to Chevella",
+        "status": "Unverified claim",
+        "evidence_source": "No public master plan or HMRL DPR includes Chevella Metro phase",
+        "distance_km": 28.0,
+        "confidence": "Low"
+      }
+    ],
+    "growth_score": 84,
+    "image_url": "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1000&q=80",
+    "description": "Rich red fertile soil suitable for sandalwood, dragon fruit, and organic farming. Located 42 km from Gachibowli Financial District. Clear 30-year link documents, digital Dharani passbook verified in mock registry.",
+    "coordinates": {
+      "lat": 17.3075,
+      "lng": 78.1342
+    }
+  },
+  {
+    "id": "bv-hyd-02",
+    "title": "Ananthagiri Eco Terraces",
+    "location": "Vikarabad Hills",
+    "district": "Vikarabad",
+    "survey_number": "SY-102/MOCK",
+    "acres": 5.5,
+    "price_per_acre_lakhs": 28.0,
+    "total_price_lakhs": 154.0,
+    "land_type": "Horticultural & Farmhouse Zone",
+    "legal_status": "Clean Title Verified",
+    "legal_risks": [],
+    "upcoming_projects": [
+      "Vikarabad Eco-Tourism Circuit",
+      "Hyderabad-Bijapur Green Corridor"
+    ],
+    "infrastructure_evidence": [
+      {
+        "claim": "Vikarabad Eco-Tourism Circuit Development",
+        "status": "Proposed",
+        "evidence_source": "Telangana Tourism Policy Draft 2024 (Demo reference)",
+        "distance_km": 6.0,
+        "confidence": "Medium"
+      },
+      {
+        "claim": "High-Speed Rail Corridor to Pune via Vikarabad",
+        "status": "Unverified claim",
+        "evidence_source": "No railway ministry DPR confirms stop or land acquisition",
+        "distance_km": 12.0,
+        "confidence": "Low"
+      }
+    ],
+    "growth_score": 72,
+    "image_url": "https://images.unsplash.com/photo-1500076656116-558758c991c1?auto=format&fit=crop&w=1000&q=80",
+    "description": "Scenic elevated plateau land with gentle slope, ideal for eco-resort or weekend farmhouse retreat. Fully fenced boundary with dedicated borewell connection and verified single-owner succession.",
+    "coordinates": {
+      "lat": 17.3364,
+      "lng": 77.9048
+    }
+  },
+  {
+    "id": "bv-hyd-03",
+    "title": "Pragati Highway Agri-Vistas",
+    "location": "Shadnagar (Kothur Belt)",
+    "district": "Ranga Reddy",
+    "survey_number": "SY-103/MOCK",
+    "acres": 12.0,
+    "price_per_acre_lakhs": 55.0,
+    "total_price_lakhs": 660.0,
+    "land_type": "Peri-Urban Agricultural",
+    "legal_status": "Clean Title Verified",
+    "legal_risks": [],
+    "upcoming_projects": [
+      "Hyderabad Pharma City Logistics Spine",
+      "Bangalore Highway (NH-44) 6-Lane Expansion"
+    ],
+    "infrastructure_evidence": [
+      {
+        "claim": "Bangalore Highway (NH-44) 6-Lane Expansion",
+        "status": "Operational",
+        "evidence_source": "NHAI Completed Projects Portal Reference NH44-EXP-MOCK",
+        "distance_km": 2.1,
+        "confidence": "High"
+      },
+      {
+        "claim": "Industrial Logistics Park Phase 2",
+        "status": "Officially announced",
+        "evidence_source": "TSIIC Allotment Notice 48/2023 (Demo reference)",
+        "distance_km": 5.8,
+        "confidence": "High"
+      }
+    ],
+    "growth_score": 88,
+    "image_url": "https://images.unsplash.com/photo-1523741543316-beb7fc7023d8?auto=format&fit=crop&w=1000&q=80",
+    "description": "Prime peri-urban holding situated near the booming Shadnagar warehousing cluster. Clean agricultural zoning with no master plan conservation overlays. Suitable for organic farming or future conversion.",
+    "coordinates": {
+      "lat": 17.0722,
+      "lng": 78.2091
+    }
+  },
+  {
+    "id": "bv-hyd-04",
+    "title": "Keesara Sunrise Meadows (Plot 4)",
+    "location": "Keesara Gutta Belt",
+    "district": "Medchal-Malkajgiri",
+    "survey_number": "SY-104/MOCK",
+    "acres": 6.0,
+    "price_per_acre_lakhs": 36.0,
+    "total_price_lakhs": 216.0,
+    "land_type": "Agricultural - Black Cotton Soil",
+    "legal_status": "Disputed / Active Encumbrance Detected",
+    "legal_risks": [
+      {
+        "risk_type": "Undischarged Mortgage / Bank Lien",
+        "severity": "CRITICAL",
+        "description": "Mock Encumbrance Certificate reflects an unreleased hypothecation of ₹85 Lakhs from Telangana Grameena Bank (Loan A/c TG-AGRI-8832-MOCK) registered in 2021.",
+        "recommended_action": "Do not sign agreement or pay advance without verified Bank No Objection Certificate (NOC) and registered mortgage discharge deed."
+      },
+      {
+        "risk_type": "Inheritance Legal Heir Claim",
+        "severity": "HIGH",
+        "description": "Co-parcenary notice pending in Sub-Court Medchal by second legal heir regarding undivided ancestral partition.",
+        "recommended_action": "Require all surviving legal heirs to execute registered partition deed and family consent affidavit."
+      }
+    ],
+    "upcoming_projects": [
+      "Outer Ring Road (ORR) Radial Road No. 8 Extension",
+      "Keesara IT Sub-Cluster Claim"
+    ],
+    "infrastructure_evidence": [
+      {
+        "claim": "Radial Road No. 8 Connectivity",
+        "status": "Proposed",
+        "evidence_source": "HMDA Master Plan 2031 Study Corridor",
+        "distance_km": 3.8,
+        "confidence": "Medium"
+      },
+      {
+        "claim": "Keesara IT Park & High-Rise Tech City",
+        "status": "Unverified claim",
+        "evidence_source": "No government notification, budget sanction, or TSIIC zoning confirms IT SEZ here",
+        "distance_km": 1.5,
+        "confidence": "Low"
+      }
+    ],
+    "growth_score": 45,
+    "image_url": "https://images.unsplash.com/photo-1516253593875-bd7ba052fbc5?auto=format&fit=crop&w=1000&q=80",
+    "description": "ATTENTION: This mock parcel has active legal warnings. Black cotton soil parcel with 30-ft approach road. While marketed at an attractive price, buyer must perform thorough legal due diligence regarding pending mortgage encumbrance.",
+    "coordinates": {
+      "lat": 17.5218,
+      "lng": 78.6784
+    }
+  },
+  {
+    "id": "bv-hyd-05",
+    "title": "Yadadri Divine Orchard Acreage",
+    "location": "Bhuvanagiri - Yadagirigutta",
+    "district": "Yadadri Bhuvanagiri",
+    "survey_number": "SY-105/MOCK",
+    "acres": 8.0,
+    "price_per_acre_lakhs": 32.0,
+    "total_price_lakhs": 256.0,
+    "land_type": "Horticultural - Mango & Guava",
+    "legal_status": "Clean Title Verified",
+    "legal_risks": [],
+    "upcoming_projects": [
+      "Hyderabad-Warangal Industrial Corridor",
+      "Yadadri Spiritual Tourism Zone"
+    ],
+    "infrastructure_evidence": [
+      {
+        "claim": "Hyderabad-Warangal Industrial Smart Highway",
+        "status": "Under construction",
+        "evidence_source": "State Highway Development Corp Project Ref SHDC-WAR-2023",
+        "distance_km": 3.2,
+        "confidence": "High"
+      },
+      {
+        "claim": "MMTS Phase 2 Extension to Raigir/Yadadri",
+        "status": "Proposed",
+        "evidence_source": "South Central Railway Survey Budget Line 2024",
+        "distance_km": 7.5,
+        "confidence": "Medium"
+      }
+    ],
+    "growth_score": 79,
+    "image_url": "https://images.unsplash.com/photo-1592982537447-7440770cbfc9?auto=format&fit=crop&w=1000&q=80",
+    "description": "Mature, yielding mango and guava orchard with drip irrigation lines, solar borewell pump, and secure perimeter fencing. Clear Title Dharani e-passbook, non-assigned land verification completed.",
+    "coordinates": {
+      "lat": 17.5833,
+      "lng": 78.9333
+    }
+  },
+  {
+    "id": "bv-hyd-06",
+    "title": "Medak Heritage Farmlands",
+    "location": "Narsapur Green Belt",
+    "district": "Medak",
+    "survey_number": "SY-106/MOCK",
+    "acres": 10.0,
+    "price_per_acre_lakhs": 35.0,
+    "total_price_lakhs": 350.0,
+    "land_type": "Agricultural & Agro-Forestry",
+    "legal_status": "Clean Title Verified",
+    "legal_risks": [],
+    "upcoming_projects": [
+      "Regional Ring Road (RRR) Northern Arc",
+      "Narsapur Forest Eco-Boulevard"
+    ],
+    "infrastructure_evidence": [
+      {
+        "claim": "Regional Ring Road (RRR) Northern Arc Section",
+        "status": "Officially announced",
+        "evidence_source": "MoRTH Land Acquisition Notification 3-D (Synthetic demo ref)",
+        "distance_km": 2.8,
+        "confidence": "High"
+      },
+      {
+        "claim": "New Greenfield International Airport in Medak",
+        "status": "Unverified claim",
+        "evidence_source": "Completely unsubstantiated rumor; Shamshabad remains sole active international hub",
+        "distance_km": 65.0,
+        "confidence": "Low"
+      }
+    ],
+    "growth_score": 81,
+    "image_url": "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=1000&q=80",
+    "description": "Lush 10-acre parcel in peaceful Narsapur reserve forest vicinity. Pristine groundwater table at 120 ft depth, organic cultivation track record for past 15 years. Verified 1-B revenue records.",
+    "coordinates": {
+      "lat": 17.7419,
+      "lng": 78.2831
+    }
+  }
+]
