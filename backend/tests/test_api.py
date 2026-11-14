@@ -1,19 +1,36 @@
 import pytest
+from io import BytesIO
+import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.services.land_service import land_service
 
 client = TestClient(app)
 
+def test_root_identifies_frontend_and_api_docs():
+    response = client.get("/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["service"] == "BhoomiVaani API"
+    assert "port 5173" in data["message"]
+    assert data["docs"] == "/docs"
+    assert data["health"] == "/health"
+
 def test_health_check():
-    response = client.get("/api/health")
+    response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["mock_mode"] is True
+    assert isinstance(data["mock_mode"], bool)
     assert data["database"]["total_properties"] == 6
+    assert data["database"]["records_without_listed_risks"] == 5
     assert data["database"]["clean_properties"] == 5
     assert data["database"]["risk_flagged_properties"] == 1
+
+def test_api_health_alias_remains_available():
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
 
 def test_get_all_lands():
     response = client.get("/api/lands")
@@ -56,8 +73,13 @@ def test_pdf_report_generation():
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
     assert len(response.content) > 1000 # Valid generated PDF bytes
+    from pypdf import PdfReader
 
-def test_ai_chat_prompt_1_clean_10_acre():
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(response.content)).pages)
+    assert "CLEAN TITLE INDICATORS" not in text
+    assert "No risk entries are listed in this synthetic demo record." in text
+
+def test_ai_chat_does_not_assign_ambiguous_area_to_a_parcel():
     payload = {
         "query": "Show me 10-acre clean agricultural land near Hyderabad",
         "language": "en"
@@ -65,9 +87,11 @@ def test_ai_chat_prompt_1_clean_10_acre():
     response = client.post("/api/ai/chat", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert "bv-hyd-01" in data["matched_land_ids"]
-    assert data["ai_mode"] == "MOCK AI"
-    assert data["audio_available"] is True
+    assert data["matched_land_ids"] == []
+    assert data["ai_mode"] == "SYNTHETIC DEMO MODE"
+    assert data["audio_available"] is False
+    assert "disabled in mock mode" in data["audio_error"]
+    assert "No specific parcel was identified" in data["response"]
     assert len(data["response"]) > 0
 
 def test_ai_chat_prompt_2_plot_4_safety():
@@ -80,11 +104,12 @@ def test_ai_chat_prompt_2_plot_4_safety():
     data = response.json()
     assert "bv-hyd-04" in data["matched_land_ids"]
     assert any("mortgage" in w.lower() or "lien" in w.lower() for w in data["legal_warnings"])
-    assert "NOT SAFE" in data["response"] or "WARNING" in data["response"] or "warning" in data["response"].lower()
+    assert "mortgage" in data["response"].lower()
+    assert "synthetic" in data["response"].lower()
 
 def test_ai_chat_prompt_3_highway_claim():
     payload = {
-        "query": "Check whether the upcoming highway claim is verified",
+        "query": "Check whether the RRR Southern Section near Chevella is verified",
         "language": "en"
     }
     response = client.post("/api/ai/chat", json=payload)
@@ -101,8 +126,32 @@ def test_broker_claim_checker_metro():
     assert response.status_code == 200
     data = response.json()
     assert data["verification_status"] == "UNVERIFIED"
-    assert data["confidence_level"] == "High"
-    assert "HMRL" in data["available_evidence"]
+    assert data["confidence_level"] == "Low"
+    assert data["evidence_type"] == "SYNTHETIC_DEMONSTRATION_DATA"
+    assert "synthetic" in data["available_evidence"].lower()
+
+def test_claim_checker_rejects_unknown_listing():
+    response = client.post("/api/claims/check", json={
+        "statement": "A highway is planned nearby.",
+        "land_id": "not-a-demo-parcel",
+        "language": "en",
+    })
+    assert response.status_code == 404
+
+def test_claim_checker_rejects_blank_statement():
+    response = client.post("/api/claims/check", json={"statement": "   "})
+    assert response.status_code == 422
+
+def test_sample_document_cannot_escape_sample_directory():
+    response = client.get("/api/documents/samples/%2E%2E%2FREADME.md")
+    assert response.status_code == 404
+
+def test_land_dataset_load_failure_is_not_silently_ignored(monkeypatch, tmp_path):
+    from app.services.land_service import LandService
+
+    monkeypatch.setattr("app.services.land_service.LANDS_FILE", tmp_path / "missing.json")
+    with pytest.raises(RuntimeError, match="Unable to load required land dataset"):
+        LandService()
 
 def test_broker_claim_checker_guarantee():
     payload = {
@@ -112,7 +161,8 @@ def test_broker_claim_checker_guarantee():
     response = client.post("/api/claims/check", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert data["verification_status"] == "CONTRADICTED"
+    assert data["verification_status"] == "UNVERIFIED"
+    assert data["confidence_level"] == "Low"
 
 def test_document_analysis_clean():
     clean_sample_text = (
@@ -127,6 +177,13 @@ def test_document_analysis_clean():
     data = response.json()
     assert data["risk_level"] in ["LOW", "MODERATE"]
     assert data["encumbrance_clauses_found"] is False
+
+def test_document_scan_does_not_treat_pattadar_as_a_clean_title_assertion():
+    from app.services.document_service import document_service
+
+    result = document_service.analyze_document("Pattadar name: Ravi.", "simple.txt")
+    assert result.detected_issues == []
+    assert "not a legal-risk or title assessment" in result.summary
 
 def test_document_analysis_disputed():
     disputed_text = (
@@ -146,16 +203,12 @@ def test_document_analysis_disputed():
 def test_text_to_speech():
     payload = {"text": "భూమివాణి కి స్వాగతం", "language": "te"}
     response = client.post("/api/ai/speak", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["audio_base64"]) > 50
-    assert data["format"] == "audio/wav"
+    assert response.status_code == 503
+    assert "disabled in mock mode" in response.json()["detail"]
 
 def test_speech_to_text():
     mock_audio = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80\x3e\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     files = {"file": ("mock.wav", mock_audio, "audio/wav")}
     response = client.post("/api/ai/transcribe", files=files, data={"language": "en"})
-    assert response.status_code == 200
-    data = response.json()
-    assert "transcript" in data
-    assert len(data["transcript"]) > 0
+    assert response.status_code == 503
+    assert "disabled in mock mode" in response.json()["detail"]

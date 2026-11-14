@@ -1,508 +1,1018 @@
-import logging
 import json
-import time
+import hashlib
+import logging
 import re
-from typing import List, Dict, Any, Optional, Tuple
+import time
+from urllib.parse import urlsplit
+from typing import Any, Dict, List, Optional, Tuple
+
 import httpx
+
 from app.config import settings
-from app.models.land import LandListing
 from app.models.ai import CharacterSpeechItem, ModelStatusItem
+from app.models.land import LandListing
+from app.services.ai_errors import ProviderRequestError, ProviderUnavailableError
+from app.services.language_service import detect_conversation_language
 
 logger = logging.getLogger(__name__)
 
+
 class ReasoningService:
-    """
-    Reasoning Engine Service supporting three provider options:
-    1. PRIMARY: Gnani Evon v3.3 30B (HuggingFace: gnani/gnani-evon-v3.3-30B-A3B / Artha AI Stack)
-    2. ALTERNATIVE: Qwen3 8B (via Ollama or OpenAI-compatible endpoint)
-    3. DEV ADAPTER: BhoomiVaani Offline Development Adapter with strict grounding
-    """
+    """Uses Evon through an explicitly configured vLLM-compatible endpoint."""
 
     def __init__(self):
-        self.provider = settings.reasoning_provider # 'GNANI_EVON', 'QWEN3_OLLAMA', 'MOCK_DEV_ADAPTER'
-        self.evon_url = settings.evon_api_url
-        self.ollama_url = settings.ollama_api_url
-        self.ollama_model = settings.ollama_model
-        self.gnani_key = settings.gnani_api_key
+        self.provider = settings.reasoning_provider
+        self.api_base_url = settings.evon_api_base_url
+        self.model = settings.evon_model
         self.last_response_time_ms = 0.0
 
     async def get_active_model_info(self) -> Tuple[str, str, bool]:
-        """
-        Returns (provider, model_name, is_live)
-        Strict rule: Never represent one model as another.
-        """
-        if self.provider == "GNANI_EVON" and self.gnani_key:
-            return "GNANI_EVON", "gnani-evon-v3.3-30b-a3b", True
-        elif self.provider == "QWEN3_OLLAMA":
-            # Check if ollama is reachable
-            is_live = await self._ping_ollama()
-            return "QWEN3_OLLAMA", self.ollama_model, is_live
-        else:
-            return "MOCK_DEV_ADAPTER", "bhoomivaani-dev-adapter", False
-
-    async def _ping_ollama(self) -> bool:
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                res = await client.get(self.ollama_url.replace("/chat/completions", "/models"))
-                return res.status_code in (200, 404, 405)
-        except Exception:
-            return False
+        if self.provider != "GNANI_EVON":
+            return self.provider, "unsupported provider", False
+        if not self.api_base_url or not self.model:
+            return "GNANI_EVON", "unconfigured", False
+        return "GNANI_EVON", self.model, False
 
     async def check_health(self) -> ModelStatusItem:
-        provider, model_name, is_live = await self.get_active_model_info()
-
-        if provider == "GNANI_EVON":
-            if not self.gnani_key:
-                return ModelStatusItem(
-                    model_name="gnani-evon-v3.3-30b-a3b",
-                    provider="GNANI_EVON",
-                    role="REASONING",
-                    connection_status="OFFLINE (NO_KEY)",
-                    is_live=False,
-                    endpoint=self.evon_url,
-                    last_ping_status="MISSING_CREDENTIALS",
-                    last_response_time_ms=0.0,
-                    supported_languages=["te", "hi", "en", "ta", "kn", "mr", "bn"],
-                    note="Official open weights: https://huggingface.co/gnani/gnani-evon-v3.3-30B-A3B. Set GNANI_API_KEY to activate."
-                )
-            start = time.time()
-            try:
-                async with httpx.AsyncClient(timeout=3.0) as client:
-                    res = await client.get(self.evon_url.replace("/v1/chat/completions", "/health"), headers={"X-API-Key-ID": self.gnani_key})
-                    latency = round((time.time() - start) * 1000, 1)
-                    ok = res.status_code in (200, 404, 405)
-                    return ModelStatusItem(
-                        model_name="gnani-evon-v3.3-30b-a3b",
-                        provider="GNANI_EVON",
-                        role="REASONING",
-                        connection_status="CONNECTED" if ok else "OFFLINE",
-                        is_live=ok,
-                        endpoint=self.evon_url,
-                        last_ping_status="OK" if ok else f"STATUS_{res.status_code}",
-                        last_response_time_ms=latency,
-                        supported_languages=["te", "hi", "en", "ta", "kn", "mr", "bn"],
-                        note="Gnani Evon v3.3 30B foundational model endpoint connected."
-                    )
-            except Exception as e:
-                return ModelStatusItem(
-                    model_name="gnani-evon-v3.3-30b-a3b",
-                    provider="GNANI_EVON",
-                    role="REASONING",
-                    connection_status="OFFLINE",
-                    is_live=False,
-                    endpoint=self.evon_url,
-                    last_ping_status="CONNECTION_FAILED",
-                    last_response_time_ms=0.0,
-                    supported_languages=["te", "hi", "en"],
-                    note=f"Evon API error: {str(e)}"
-                )
-
-        elif provider == "QWEN3_OLLAMA":
-            start = time.time()
-            is_ok = await self._ping_ollama()
-            latency = round((time.time() - start) * 1000, 1)
+        if settings.mock_mode:
             return ModelStatusItem(
-                model_name=self.ollama_model,
-                provider="QWEN3_OLLAMA",
+                model_name="Gnani Evon v3.3",
+                provider=self.provider,
                 role="REASONING",
-                connection_status="CONNECTED" if is_ok else "OFFLINE",
-                is_live=is_ok,
-                endpoint=self.ollama_url,
-                last_ping_status="OK" if is_ok else "OLLAMA_OFFLINE",
-                last_response_time_ms=latency,
-                supported_languages=["en", "hi", "zh"],
-                note="Qwen3 8B Ollama local server (https://ollama.com/library/qwen3)." if is_ok else "Ollama server not detected at configured endpoint."
-            )
-
-        else: # MOCK_DEV_ADAPTER
-            return ModelStatusItem(
-                model_name="bhoomivaani-dev-adapter",
-                provider="MOCK_DEV_ADAPTER",
-                role="REASONING",
-                connection_status="MOCK_FALLBACK",
+                connection_status="CONFIGURATION_ERROR",
                 is_live=False,
-                endpoint="local://deterministic_rules_engine",
-                last_ping_status="HEALTHY (DEV ADAPTER)",
-                last_response_time_ms=2.5,
-                supported_languages=["te", "hi", "en", "ta", "kn", "mr", "bn", "gu", "pa"],
-                note="BhoomiVaani specialized multi-character legal & infrastructure reasoning adapter."
+                endpoint="",
+                last_ping_status="MOCK_MODE_DISABLED",
+                supported_languages=[],
+                note="MOCK_MODE=true disables live reasoning; synthetic reasoning is not used. Set MOCK_MODE=false.",
             )
+        if self.provider != "GNANI_EVON":
+            return ModelStatusItem(
+                model_name="unconfigured",
+                provider=self.provider,
+                role="REASONING",
+                connection_status="CONFIGURATION_ERROR",
+                is_live=False,
+                endpoint="",
+                last_ping_status="UNSUPPORTED_PROVIDER",
+                supported_languages=[],
+                note=(
+                    f"REASONING_PROVIDER='{self.provider}' is unsupported. Ollama and synthetic reasoning "
+                    "are not used. Set REASONING_PROVIDER=GNANI_EVON and configure an Evon vLLM-compatible endpoint."
+                ),
+            )
+        if not self.api_base_url or not self.model:
+            return ModelStatusItem(
+                model_name="Gnani Evon v3.3",
+                provider="GNANI_EVON",
+                role="REASONING",
+                connection_status="NOT_CONFIGURED",
+                is_live=False,
+                endpoint="",
+                last_ping_status="MISSING_ENDPOINT_OR_MODEL",
+                supported_languages=["en", "hi", "bn", "te", "ta", "mr", "gu", "kn", "ml", "pa"],
+                note=(
+                    "No hosted Evon inference API is documented. Configure EVON_API_BASE_URL and EVON_MODEL "
+                    "for a vLLM-compatible Evon deployment; no alternative provider is used."
+                ),
+            )
+        endpoint = self._endpoint_url()
+        if endpoint is None:
+            return ModelStatusItem(
+                model_name=self.model,
+                provider="GNANI_EVON",
+                role="REASONING",
+                connection_status="CONFIGURATION_ERROR",
+                is_live=False,
+                endpoint="",
+                last_ping_status="INVALID_ENDPOINT",
+                supported_languages=["en", "hi", "bn", "te", "ta", "mr", "gu", "kn", "ml", "pa"],
+                note="EVON_API_BASE_URL must be an HTTP(S) base URL without credentials, query, or fragment.",
+            )
+        return ModelStatusItem(
+            model_name=self.model,
+            provider="GNANI_EVON",
+            role="REASONING",
+            connection_status="CONFIGURED_UNVERIFIED",
+            is_live=False,
+            endpoint=self._safe_endpoint_display(),
+            last_ping_status="NOT_PROBED",
+            supported_languages=["en", "hi", "bn", "te", "ta", "mr", "gu", "kn", "ml", "pa"],
+            note="Evon endpoint and model are configured. A successful inference request is required to verify connectivity.",
+        )
+
+    def _endpoint_url(self) -> Optional[str]:
+        parsed = urlsplit(self.api_base_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+        return f"{self.api_base_url.rstrip('/')}/v1/chat/completions"
+
+    def _safe_endpoint_display(self) -> str:
+        parsed = urlsplit(self.api_base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return ""
+        host = parsed.hostname
+        if parsed.port:
+            host = f"{host}:{parsed.port}"
+        return f"{parsed.scheme}://{host}"
 
     async def investigate_collaborative(
         self,
         query: str,
-        conversation_language: str = "te",
+        conversation_language: str = "en",
         available_lands: Optional[List[LandListing]] = None,
-        selected_land_id: Optional[str] = None
+        selected_land_id: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        document_analyses: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """
-        Coordinates full multi-character investigation team:
-        1. Bhoomi: Land Guide (frames inquiry, welcomes user, retrieves listings)
-        2. Infra: Infrastructure Explorer (evaluates highway/metro claims, distances, evidence)
-        3. Nyaya: Legal Detective (examines mortgage, court disputes, succession, missing signatures)
-        4. Amma: Buyer's Guardian (explains in simple family terms, issues protective precautions)
-        """
-        start = time.time()
-        if available_lands is None:
-            available_lands = []
-
-        provider, model_name, is_live = await self.get_active_model_info()
-
-        # If live Qwen3 Ollama endpoint is configured and reachable
-        if provider == "QWEN3_OLLAMA" and is_live:
-            try:
-                res = await self._run_ollama_reasoning(query, conversation_language, available_lands, selected_land_id)
-                self.last_response_time_ms = round((time.time() - start) * 1000, 1)
-                return res
-            except Exception as e:
-                logger.error(f"Ollama execution error: {e}, falling back to dev adapter")
-
-        # If live Gnani Evon is configured and reachable
-        if provider == "GNANI_EVON" and is_live:
-            try:
-                res = await self._run_evon_reasoning(query, conversation_language, available_lands, selected_land_id)
-                self.last_response_time_ms = round((time.time() - start) * 1000, 1)
-                return res
-            except Exception as e:
-                logger.error(f"Gnani Evon error: {e}, falling back to dev adapter")
-
-        # Deterministic Grounded Multi-Character Adapter
-        res = self._deterministic_collaborative_investigation(
-            query=query,
-            lang=conversation_language,
-            available_lands=available_lands,
-            selected_land_id=selected_land_id
+        started = time.monotonic()
+        if settings.mock_mode:
+            raise ProviderUnavailableError(
+                "MOCK_MODE=true disables live reasoning. Synthetic reasoning is disabled; set MOCK_MODE=false."
+            )
+        if self.provider != "GNANI_EVON":
+            raise ProviderUnavailableError(
+                f"Reasoning provider '{self.provider}' is unsupported. Set REASONING_PROVIDER=GNANI_EVON; Ollama and synthetic reasoning are not used."
+            )
+        if not self.api_base_url or not self.model:
+            raise ProviderUnavailableError(
+                "Evon reasoning is not configured. Set EVON_API_BASE_URL and EVON_MODEL for an Evon vLLM-compatible inference endpoint; no fallback is used."
+            )
+        endpoint = self._endpoint_url()
+        if endpoint is None:
+            raise ProviderUnavailableError(
+                "EVON_API_BASE_URL must be an HTTP(S) base URL without credentials, query, or fragment."
+            )
+        language = detect_conversation_language(query, conversation_language)
+        result = await self._run_evon_reasoning(
+            query,
+            language,
+            available_lands or [],
+            selected_land_id,
+            conversation_history,
+            document_analyses,
+            endpoint,
         )
-        self.last_response_time_ms = round((time.time() - start) * 1000, 1)
-        return res
+        self.last_response_time_ms = round((time.monotonic() - started) * 1000, 1)
+        return result
 
-    def _deterministic_collaborative_investigation(
+    def _select_land(
+        self, query: str, available_lands: List[LandListing], selected_land_id: Optional[str]
+    ) -> Optional[LandListing]:
+        explicitly_selected = next(
+            (land for land in available_lands if land.id == selected_land_id), None
+        ) if selected_land_id else None
+        query_lower = query.casefold()
+        query_tokens = set(re.findall(r"[\w-]+", query_lower))
+        normalized_query = re.sub(r"[^a-z0-9]", "", query_lower)
+        area_matches = [
+            float(match)
+            for match in re.findall(
+                r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:-?\s*(?:acres?|ac|ఎకరాలు|ఎకరం|ఎకరాల))",
+                query_lower,
+            )
+        ]
+        scores: List[Tuple[LandListing, int, bool]] = []
+        for land in available_lands:
+            score = 0
+            specific_match = False
+            if land.id.casefold() in query_lower:
+                score += 100
+                specific_match = True
+            normalized_survey = re.sub(r"[^a-z0-9]", "", land.survey_number.casefold())
+            if normalized_survey and normalized_survey in normalized_query:
+                score += 80
+                specific_match = True
+            if any(phrase and phrase.casefold() in query_lower for phrase in (land.title, land.location)):
+                score += 40
+                specific_match = True
+            location_tokens = set(re.findall(r"[\w-]+", land.location.casefold()))
+            matched_location_tokens = query_tokens & location_tokens
+            score += min(len(matched_location_tokens), 2) * 10
+            specific_match = specific_match or bool(matched_location_tokens)
+            title_tokens = set(re.findall(r"[\w-]+", land.title.casefold()))
+            matched_title_tokens = query_tokens & title_tokens
+            if len(matched_title_tokens) >= 2:
+                score += 20
+                specific_match = True
+            if any(abs(area - land.acres) < 0.01 for area in area_matches):
+                score += 15
+            if score and specific_match:
+                scores.append((land, score, specific_match))
+        if not scores:
+            return explicitly_selected
+        best_score = max(score for _, score, _ in scores)
+        best_matches = [land for land, score, _ in scores if score == best_score]
+        if len(best_matches) == 1:
+            return best_matches[0]
+        if explicitly_selected and explicitly_selected in best_matches:
+            return explicitly_selected
+        return None
+
+    def _build_report(self, land: Optional[LandListing]) -> Dict[str, Any]:
+        if land is None:
+            return {
+                "property": {
+                    "id": None,
+                    "name": "No parcel selected",
+                    "location": "Not provided",
+                    "district": "Not provided",
+                    "survey_reference": "Not provided",
+                    "area_acres": None,
+                    "asking_price_lakhs": None,
+                    "land_type": "Not provided",
+                },
+                "ownership_and_title": {
+                    "status": "NOT_ASSESSED",
+                    "detail": "No parcel was uniquely identified. No ownership, title, encumbrance, survey, or location records were checked.",
+                },
+                "document_analysis": {
+                    "status": "NOT_PROVIDED",
+                    "detail": "No property documents were supplied for this general-awareness response.",
+                },
+                "encumbrance_indicators": [],
+                "survey_and_boundary": {
+                    "status": "NOT_ASSESSED",
+                    "detail": "Select a parcel or provide its specific location or survey reference to frame a parcel-specific review.",
+                },
+                "infrastructure": [],
+                "potential_risks": [],
+                "missing_documents": [
+                    "Exact property location and survey reference",
+                    "Registered title deeds and complete chain of title",
+                    "Current Encumbrance Certificate from the Sub-Registrar",
+                    "Official revenue records and boundary survey",
+                ],
+                "recommended_next_steps": [
+                    "Select a demonstration parcel or provide an exact location and survey reference.",
+                    "Have an independent property advocate review original records.",
+                    "Verify current certified records directly with the relevant authorities.",
+                ],
+                "evidence_classification": "NO_PROPERTY_DATA",
+                "confidence": "NOT_ASSESSED",
+                "disclaimer": "General awareness only. No parcel was identified; this is not property-specific, official verification, or legal advice.",
+            }
+        risks = [risk.model_dump() for risk in land.legal_risks]
+        infrastructure = [item.model_dump() for item in land.infrastructure_evidence]
+        return {
+            "property": {
+                "id": land.id,
+                "name": land.title,
+                "location": land.location,
+                "district": land.district,
+                "survey_reference": land.survey_number,
+                "area_acres": land.acres,
+                "asking_price_lakhs": land.total_price_lakhs,
+                "land_type": land.land_type,
+            },
+            "ownership_and_title": {
+                "status": "NOT_VERIFIED",
+                "detail": "No owner identity, chain of title, or authoritative revenue record is available in this synthetic demo listing.",
+            },
+            "document_analysis": {
+                "status": "NOT_PROVIDED",
+                "detail": "No title deed, patta, encumbrance certificate, or survey record was supplied for this investigation.",
+            },
+            "encumbrance_indicators": risks or [{
+                "risk_type": "No risk entry listed in demo dataset",
+                "severity": "UNKNOWN",
+                "description": "The absence of a listed risk is not evidence that no encumbrance exists.",
+                "recommended_action": "Obtain and independently verify a current Encumbrance Certificate.",
+            }],
+            "survey_and_boundary": {
+                "status": "NOT_VERIFIED",
+                "detail": "The survey reference is synthetic; no official map, FMB, or physical demarcation was checked.",
+            },
+            "infrastructure": infrastructure,
+            "potential_risks": risks,
+            "missing_documents": [
+                "Registered title deeds and complete chain of title",
+                "Current Encumbrance Certificate from the Sub-Registrar",
+                "Official revenue records and pattadar details",
+                "FMB / village map and government boundary demarcation",
+                "Court, acquisition, and prohibited-property searches",
+            ],
+            "recommended_next_steps": [
+                "Have an independent property advocate review original documents and the title chain.",
+                "Obtain current certified records directly from the relevant authorities.",
+                "Commission an official survey and verify boundary stones on site.",
+                "Do not pay an advance based only on this demonstration record or broker claims.",
+            ],
+            "evidence_classification": "SYNTHETIC_DEMONSTRATION_DATA",
+            "confidence": "LOW",
+            "disclaimer": "Preliminary legal awareness only. This synthetic demonstration is not official verification or legal advice.",
+        }
+
+    def _build_case_report(
         self,
         query: str,
-        lang: str,
-        available_lands: List[LandListing],
-        selected_land_id: Optional[str]
+        conversation_history: Optional[List[Dict[str, str]]],
+        land: Optional[LandListing],
+        document_analyses: Optional[List[Dict[str, Any]]],
     ) -> Dict[str, Any]:
-        """
-        Strictly evidence-based, deterministic investigation adapter.
-        Matches the user query against the 6 synthetic properties and generates authentic,
-        distinct persona dialogue for Bhoomi, Infra, Nyaya, and Amma in the conversation language.
-        """
-        q = query.lower()
+        report = self._build_report(land)
+        documents = document_analyses or []
+        buyer = self._build_buyer_context(query, conversation_history, documents)
+        user_statements = [
+            item["content"]
+            for item in (conversation_history or [])
+            if item.get("role") == "user" and isinstance(item.get("content"), str)
+        ]
+        if query.strip() and (not user_statements or user_statements[-1] != query.strip()):
+            user_statements.append(query.strip())
 
-        # Check which property is relevant
-        target_land: Optional[LandListing] = None
-        matched_ids = []
+        report["buyer_requirements"] = {
+            "buying_intent": buyer["buying_intent"],
+            "preferred_location": buyer["preferred_location"],
+            "land_type": buyer["land_type"],
+            "acreage": buyer["acreage"],
+            "budget": buyer["budget"],
+            "intended_purpose": buyer["intended_purpose"],
+            "broker_status": buyer["broker_status"],
+            "asking_price_per_acre_as_stated": buyer["asking_price_per_acre"],
+            "other_preferences": buyer["buyer_preferences"],
+            "conversation_statements": user_statements,
+            "evidence_status": "USER_PROVIDED_NOT_VERIFIED",
+        }
+        report["user_provided_property_details"] = {
+            "location": buyer["preferred_location"],
+            "survey_reference": buyer["survey_reference"],
+            "area": buyer["acreage"],
+            "land_type": buyer["land_type"],
+            "asking_price_per_acre": buyer["asking_price_per_acre"],
+            "source": "Buyer conversation; not independently verified",
+        }
+        report["broker_workflow"] = {
+            "status": buyer["broker_status"],
+            "description": {
+                "YES": "Broker or seller claims were supplied; each remains unverified.",
+                "NO": "The buyer reported no broker; this is an independent-search workflow.",
+                "UNKNOWN": "The conversation did not establish whether a broker was approached.",
+            }[buyer["broker_status"]],
+        }
+        incomplete_requirements = [
+            label
+            for label, key in (
+                ("Preferred location", "preferred_location"),
+                ("Land type", "land_type"),
+                ("Required acreage", "acreage"),
+                ("Budget", "budget"),
+                ("Intended purpose", "intended_purpose"),
+            )
+            if not buyer[key]
+        ]
+        if buyer["broker_status"] == "UNKNOWN":
+            incomplete_requirements.append("Broker status")
+        if not land and not buyer["survey_reference"]:
+            incomplete_requirements.append("Specific property or survey reference")
+        if not documents:
+            incomplete_requirements.append("Property document analysis")
+        if buyer["next_missing_detail"]:
+            incomplete_requirements.append(buyer["next_missing_detail"])
+        report["report_completeness"] = {
+            "status": "INCOMPLETE" if incomplete_requirements else "INPUTS_PRESENT_UNVERIFIED",
+            "missing_information": list(dict.fromkeys(incomplete_requirements)),
+            "note": "Input completeness does not mean that any property fact or document was independently verified.",
+        }
+        case_material = json.dumps({
+            "query": query,
+            "conversation_history": conversation_history or [],
+            "selected_land_id": land.id if land else None,
+            "documents": documents,
+        }, ensure_ascii=False, sort_keys=True, default=str)
+        report["case_id"] = f"BV-{hashlib.sha256(case_material.encode('utf-8')).hexdigest()[:10].upper()}"
+        report["broker_claims"] = []
+        for statement in buyer["broker_statements"]:
+            has_identifying_evidence = bool(land) or any(
+                document.get("survey_numbers_found") for document in documents
+            )
+            has_document_scan = bool(documents)
+            findings = [
+                f"{document.get('filename', 'Uploaded document')}: "
+                f"{issue.get('issue_title', 'Text-pattern indicator')}"
+                for document in documents
+                for issue in document.get("detected_issues", [])
+            ]
+            report["broker_claims"].append({
+                "claim": statement,
+                "status": "UNVERIFIED" if has_document_scan and has_identifying_evidence else "MISSING_INFORMATION",
+                "evidence": "; ".join(findings) if findings else (
+                    "No parcel-specific official evidence was available. Uploaded documents, if any, "
+                    "were scanned only for text patterns."
+                ),
+                "missing_information": (
+                    []
+                    if has_document_scan and has_identifying_evidence
+                    else [
+                        item for item, missing in (
+                            ("Exact village and survey/subdivision reference", not has_identifying_evidence),
+                            ("A relevant document or official record for this claim", not has_document_scan),
+                        )
+                        if missing
+                    ]
+                ),
+                "required_checks": self._broker_claim_checks(statement),
+            })
 
-        if "plot 4" in q or "plot-4" in q or "keesara" in q or "sy-104" in q or "6-acre" in q or "6 acre" in q or "disputed" in q:
-            target_land = next((l for l in available_lands if l.id == "bv-hyd-04"), None)
-            matched_ids = ["bv-hyd-04"]
-        elif "10" in q or "ten" in q or "chevella" in q or "sy-101" in q:
-            target_land = next((l for l in available_lands if l.id == "bv-hyd-01"), None)
-            matched_ids = ["bv-hyd-01", "bv-hyd-06"]
-        elif "highway" in q or "road" in q or "rrr" in q or "హైవే" in q:
-            target_land = next((l for l in available_lands if l.id == "bv-hyd-01"), None)
-            matched_ids = ["bv-hyd-01", "bv-hyd-03", "bv-hyd-06"]
-        elif selected_land_id:
-            target_land = next((l for l in available_lands if l.id == selected_land_id), None)
-            matched_ids = [selected_land_id]
+        report["document_analysis"] = {
+            "status": "PATTERN_SCAN_ONLY" if documents else "NOT_PROVIDED",
+            "detail": (
+                "Uploaded text was scanned for patterns only. The scan does not verify authenticity, "
+                "completeness, current status, ownership, or legal effect."
+                if documents else
+                "No document analysis was supplied in this conversation."
+            ),
+            "documents": [
+                {
+                    "filename": document.get("filename", "Uploaded document"),
+                    "summary": document.get("summary", "No summary was provided."),
+                    "survey_numbers_found": document.get("survey_numbers_found", []),
+                    "detected_issues": document.get("detected_issues", []),
+                    "disclaimer": document.get("disclaimer", ""),
+                    "evidence_type": "USER_PROVIDED_DOCUMENT_TEXT",
+                }
+                for document in documents
+            ],
+        }
+        report["claim_verification"] = {
+            "status": "UNVERIFIED",
+            "detail": (
+                "No official revenue, registration, court, acquisition, or infrastructure records were queried."
+            ),
+        }
+        report["property_comparison"] = {
+            "status": "NO_VERIFIED_LISTING_FEED",
+            "properties": [],
+            "detail": (
+                "No live or independently verified listing feed is configured. Synthetic demonstration "
+                "records are not represented as available properties or recommendations."
+            ),
+        }
+        report["potential_advantages"] = [
+            "No independently verified property advantages, access, services, or nearby facilities were supplied."
+        ]
+        report["financial_breakdown"] = {
+            "buyer_budget_as_stated": buyer["budget"],
+            "broker_asking_price_per_acre_as_stated": buyer["asking_price_per_acre"],
+            "property_area_acres": land.acres if land else None,
+            "asking_price_per_acre_lakhs": land.price_per_acre_lakhs if land else None,
+            "asking_price_total_lakhs": land.total_price_lakhs if land else None,
+            "estimate_status": (
+                "SYNTHETIC_DEMO_FIGURES" if land else "INSUFFICIENT_PROPERTY_PRICE_INFORMATION"
+            ),
+            "note": (
+                "Figures are copied from a synthetic demonstration record and are not a market valuation."
+                if land else
+                "No parcel-specific price was supplied or verified; fees, taxes, and transaction costs are excluded."
+            ),
+        }
+        if buyer["broker_status"] == "YES":
+            report["recommended_next_steps"] = [
+                "Ask the broker or seller for the original documents and exact survey/subdivision reference supporting each claim.",
+                "Verify every supplied document and claim with the issuing authority and an independent property advocate.",
+                "Do not pay an advance based only on broker statements or text-pattern document scans.",
+            ]
+        elif buyer["broker_status"] == "NO":
+            report["recommended_next_steps"] = [
+                "Continue the independent search using the buyer requirements captured in this report.",
+                "For any candidate parcel, obtain its exact village and survey/subdivision reference before assessing it.",
+                "Have an independent property advocate verify original records before paying an advance.",
+            ]
+        report["seller_questions"] = [
+            "Can you provide the registered original sale deed and the complete chain of title?",
+            "Can I obtain a current Encumbrance Certificate directly from the Sub-Registrar?",
+            "Do the survey number, subdivision, area, and boundaries match official revenue records and a site survey?",
+            "Are there any mortgages, court matters, acquisition notices, restrictions, or unpaid dues?",
+            "What official records support the road, water, electricity, zoning, and nearby-project claims?",
+        ]
+        report["overall_assessment"] = {
+            "status": "NOT_DETERMINED",
+            "confidence": "LOW",
+            "detail": (
+                "This report is a preliminary awareness summary. It cannot determine that a property is safe "
+                "to buy; independent checks of current original records are required."
+            ),
+        }
+        report["confidence"] = "LOW"
+        report["disclaimer"] = (
+            "General awareness only. No parcel was identified. User statements, uploaded document text, "
+            "and synthetic demo records are not independently verified. This is not a legal opinion, "
+            "title certificate, or guarantee that a property is safe to buy."
+            if land is None else
+            "Preliminary AI awareness only. User statements, uploaded document text, and synthetic demo "
+            "records are not independently verified. This is not a legal opinion, title certificate, "
+            "or guarantee that a property is safe to buy."
+        )
+        return report
+
+    @staticmethod
+    def _broker_claim_checks(statement: str) -> List[str]:
+        claim = statement.casefold()
+        checks: List[str] = []
+        if any(term in claim for term in ("owner", "ownership", "belongs", "title", "seller")):
+            checks.extend([
+                "Inspect the registered sale deed and complete chain of title, and confirm the seller's identity and authority to sell.",
+                "Obtain a current Encumbrance Certificate directly from the Sub-Registrar and compare it with official revenue and mutation records.",
+            ])
+        if any(term in claim for term in ("dispute", "court", "case", "litigation", "clear", "legal problem")):
+            checks.extend([
+                "Search the exact parcel and parties in relevant civil and revenue court records, then review certified orders with an independent advocate.",
+                "Check for acquisition, prohibited-property, land-use, and revenue restrictions with the relevant authorities.",
+            ])
+        if any(term in claim for term in ("highway", "road", "metro", "rail", "airport", "project", "development")):
+            checks.extend([
+                "Request the project's official government order, approval or tender record, and a published alignment or land-acquisition map from the responsible agency.",
+                "Match the official alignment to the parcel's survey number; do not rely on distance or timing stated by a broker.",
+            ])
+        if any(term in claim for term in ("mortgage", "loan", "encumbrance", "lien", "debt")):
+            checks.extend([
+                "Obtain a current Encumbrance Certificate from the Sub-Registrar and verify any registered mortgage entry.",
+                "For a claimed repayment, inspect the lender's closure confirmation and registered release or reconveyance deed.",
+            ])
+        if any(term in claim for term in ("water", "borewell", "electricity", "power", "access", "connectivity")):
+            checks.extend([
+                "Inspect the parcel and confirm all-season legal road access, boundaries, and existing utility connections with the relevant providers.",
+                "Verify water source, yield, quality, and any required groundwater permissions independently.",
+            ])
+        if any(term in claim for term in ("price", " lakhs", "lakh", "crore", "per acre", "cost")):
+            checks.append(
+                "Compare the asking price with recent registered transactions and the applicable official guideline value; this report does not verify market value."
+            )
+        if not checks:
+            checks.extend([
+                "Obtain the exact document or official record supporting the statement.",
+                "Verify it with the issuing authority and an independent property advocate.",
+            ])
+        return list(dict.fromkeys(checks))
+
+    def build_case_report(
+        self,
+        conversation_history: List[Dict[str, str]],
+        land: Optional[LandListing],
+        document_analyses: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        user_messages = [
+            item.get("content", "")
+            for item in conversation_history
+            if item.get("role") == "user" and isinstance(item.get("content"), str)
+        ]
+        latest_query = user_messages[-1] if user_messages else ""
+        return self._build_case_report(
+            latest_query,
+            conversation_history[:-1] if user_messages else conversation_history,
+            land,
+            document_analyses,
+        )
+
+    @staticmethod
+    def _build_buyer_context(
+        query: str,
+        conversation_history: Optional[List[Dict[str, str]]],
+        document_analyses: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        user_messages = [
+            item["content"]
+            for item in (conversation_history or [])
+            if item.get("role") == "user" and isinstance(item.get("content"), str)
+        ]
+        user_messages.append(query)
+
+        def latest_match(pattern: str, group: int = 0) -> Optional[str]:
+            for message in reversed(user_messages):
+                match = re.search(pattern, message, re.IGNORECASE)
+                if match:
+                    return match.group(group).strip(" \t\r\n.,;:") or None
+            return None
+
+        location = None
+        for message in reversed(user_messages):
+            match = re.search(
+                r"\b(?:near|around|close to|in|at)\s+([^\W\d_][\w .'-]{0,48})",
+                message,
+                re.IGNORECASE,
+            )
+            if match:
+                location = re.split(
+                    r"\b(?:and|but|for|with|because|where|which)\b",
+                    match.group(1),
+                    maxsplit=1,
+                    flags=re.IGNORECASE,
+                )[0].strip(" \t\r\n.,;:")
+                if location:
+                    break
+
+        land_type = latest_match(
+            r"\b(?:agricultural|agriculture|residential|commercial|industrial|"
+            r"farm(?:ing)?|open\s+plot|plots?)\b(?:\s+land)?"
+        )
+        acreage = latest_match(
+            r"\b\d+(?:\.\d+)?(?:\s*(?:to|-|–)\s*\d+(?:\.\d+)?)?\s*"
+            r"(?:acres?|ac|ఎకరాలు|ఎకరం|ఎకరాల)\b"
+        )
+        amount_pattern = (
+            r"(?:₹|INR\s*|Rs\.?\s*)\s*\d[\d,]*(?:\.\d+)?(?:\s*(?:lakh(?:s)?|"
+            r"lac(?:s)?|crore(?:s)?|cr|million|thousand))?"
+            r"|\b\d[\d,]*(?:\.\d+)?\s*(?:lakh(?:s)?|lac(?:s)?|crore(?:s)?|"
+            r"cr|million|thousand)\b"
+        )
+        budget = None
+        for message in reversed(user_messages):
+            if not re.search(r"\b(?:budget|afford|spend|maximum|limit)\b", message, re.IGNORECASE):
+                continue
+            match = re.search(amount_pattern, message, re.IGNORECASE)
+            if match and not re.search(
+                r"\bper\s+acre\b", message[match.end():match.end() + 24], re.IGNORECASE
+            ):
+                budget = match.group(0).strip()
+                break
+        if budget is None:
+            for message in reversed(user_messages):
+                for match in reversed(list(re.finditer(amount_pattern, message, re.IGNORECASE))):
+                    context_start = max(0, match.start() - 24)
+                    context_end = min(len(message), match.end() + 24)
+                    if not re.search(r"\bper\s+acre\b", message[context_start:context_end], re.IGNORECASE):
+                        budget = match.group(0).strip()
+                        break
+                if budget:
+                    break
+
+        asking_price_per_acre = latest_match(
+            rf"({amount_pattern})\s*(?:per\s+acre|/\s*acre)", group=1
+        )
+        broker_mentions = [
+            message for message in user_messages
+            if re.search(r"\b(?:broker|agent|seller|owner)\b", message, re.IGNORECASE)
+        ]
+        broker_status = "UNKNOWN"
+        for message in reversed(broker_mentions):
+            if re.search(
+                r"\b(?:no\s+broker|without\s+(?:a\s+)?broker|searching\s+independently|"
+                r"(?:haven't|have\s+not|never|didn't|did\s+not)\s+(?:yet\s+)?"
+                r"(?:approached|contacted|spoken|talked|met))\b",
+                message,
+                re.IGNORECASE,
+            ):
+                broker_status = "NO"
+                break
+            if re.search(
+                r"\b(?:already|yes|have|met|spoke|spoken|contacted|approached)\b.{0,40}"
+                r"\b(?:broker|agent)\b|\b(?:broker|agent)\b.{0,24}"
+                r"\b(?:showed|told|said|offered|quoted|promised)\b",
+                message,
+                re.IGNORECASE,
+            ):
+                broker_status = "YES"
+                break
+
+        def direct_broker_answer(answer: str) -> Optional[str]:
+            if re.match(
+                r"^(?:no|nope|not\s+yet|i\s+haven't|i\s+have\s+not|i\s+didn't|i\s+did\s+not)\b",
+                answer.strip(),
+                re.IGNORECASE,
+            ):
+                return "NO"
+            if re.match(
+                r"^(?:yes|yeah|yep|correct|i\s+have|already)\b",
+                answer.strip(),
+                re.IGNORECASE,
+            ):
+                return "YES"
+            return None
+
+        history_items = conversation_history or []
+        for index, item in enumerate(history_items):
+            if item.get("role") != "assistant" or not re.search(
+                r"\b(?:broker|agent)\b", item.get("content", ""), re.IGNORECASE
+            ):
+                continue
+            answer = ""
+            for candidate in history_items[index + 1:]:
+                if candidate.get("role") == "assistant":
+                    break
+                if candidate.get("role") == "user" and isinstance(candidate.get("content"), str):
+                    answer = candidate["content"]
+                    break
+            status = direct_broker_answer(answer)
+            if status:
+                broker_status = status
+
+        previous_advisor_question = next(
+            (
+                item.get("content", "")
+                for item in reversed(conversation_history or [])
+                if item.get("role") == "assistant" and isinstance(item.get("content"), str)
+            ),
+            "",
+        )
+        current_answer = query.strip()
+        if broker_status == "UNKNOWN" and re.search(
+            r"\b(?:broker|agent)\b", previous_advisor_question, re.IGNORECASE
+        ):
+            broker_status = direct_broker_answer(current_answer) or broker_status
+        def asks_for_broker_claim(text: str) -> bool:
+            return bool(re.search(
+                r"\b(?:what|which|tell|share|describe|explain)\b.{0,100}"
+                r"\b(?:broker|agent|seller)\b"
+                r"|\b(?:broker|agent|seller)\b.{0,80}\b(?:said|say|told|claim|offer|show)\b",
+                text,
+                re.IGNORECASE,
+            ))
+
+        broker_statements = [
+            message for message in broker_mentions
+            if re.search(
+                r"\b(?:said|says|told|showed|claimed|claims|promised|offered|quoted|"
+                r"price|cost|clear\s+title|no\s+legal\s+problem)\b",
+                message,
+                re.IGNORECASE,
+            )
+        ][-5:]
+        for index, item in enumerate(history_items):
+            if item.get("role") != "assistant" or not asks_for_broker_claim(item.get("content", "")):
+                continue
+            answer = ""
+            for candidate in history_items[index + 1:]:
+                if candidate.get("role") == "assistant":
+                    break
+                if candidate.get("role") == "user" and isinstance(candidate.get("content"), str):
+                    answer = candidate["content"].strip()
+                    break
+            if answer and not re.match(r"^(?:yes|yeah|yep|no|nope|not yet)\b", answer, re.IGNORECASE):
+                broker_statements.append(answer)
+        if asks_for_broker_claim(previous_advisor_question) and current_answer and not re.match(
+            r"^(?:yes|yeah|yep|no|nope|not yet)\b", current_answer, re.IGNORECASE
+        ):
+            broker_statements.append(current_answer)
+        broker_statements = list(dict.fromkeys(broker_statements))[-5:]
+        documents = [
+            message for message in user_messages
+            if re.search(
+                r"\b(?:documents?|deeds?|patta|papers?|encumbrance|survey)\b|"
+                r"\btitle\s+(?:deed|documents?|papers?|records?|chain)\b",
+                message,
+                re.IGNORECASE,
+            )
+        ][-3:]
+        concerns = [
+            message for message in user_messages
+            if re.search(
+                r"\b(?:concern|worried|worry|risk|dispute|mortgage|loan|fraud|issue)\b",
+                message,
+                re.IGNORECASE,
+            )
+        ][-3:]
+        buyer_preferences = [
+            message for message in user_messages
+            if re.search(
+                r"\b(?:road|access|water|irrigat|borewell|electricity|power|"
+                r"distance|nearby|hospital|school|farming|investment|purpose)\b",
+                message,
+                re.IGNORECASE,
+            )
+        ][-5:]
+        intended_purpose = latest_match(
+            r"\b(?:for|purpose(?:\s+is)?)\s+(farming|agriculture|investment|"
+            r"residence|residential|commercial|business|horticulture|a\s+farmhouse)\b"
+        )
+        buying_intent = any(
+            re.search(r"\b(?:buy|buying|purchase|purchasing|acquire)\b", message, re.IGNORECASE)
+            for message in user_messages
+        )
+        survey_reference = latest_match(
+            r"\b(?:survey\s*(?:number|no\.?)|s\.?\s*no\.?|sy)\s*[-:#/ ]*"
+            r"([A-Z]*\d[A-Z0-9/-]*)\b",
+            group=1,
+        )
+        if survey_reference is None:
+            survey_reference = next(
+                (
+                    reference
+                    for document in document_analyses or []
+                    for reference in document.get("survey_numbers_found", [])
+                    if isinstance(reference, str) and reference.strip()
+                ),
+                None,
+            )
+        assistant_questions = [
+            item.get("content", "")
+            for item in history_items
+            if item.get("role") == "assistant" and isinstance(item.get("content"), str)
+        ]
+        survey_question_asked = bool(assistant_questions and re.search(
+            r"\b(?:survey|subdivision)\b", assistant_questions[-1], re.IGNORECASE
+        ))
+        survey_answered_without_number = survey_question_asked and bool(re.search(
+            r"\b(?:don't know|do not know|not sure|no survey|don't have|do not have)\b",
+            current_answer,
+            re.IGNORECASE,
+        ))
+        document_question_asked = bool(assistant_questions and re.search(
+            r"\b(?:document|deed|patta|paper)\b", assistant_questions[-1], re.IGNORECASE
+        ))
+        document_answered_without_upload = document_question_asked and bool(re.match(
+            r"^(?:yes|yeah|yep|no|nope|not yet|i have|i don't|i do not)\b",
+            current_answer,
+            re.IGNORECASE,
+        ))
+        if not buying_intent:
+            next_missing_detail = None
+        elif not location:
+            next_missing_detail = "preferred location"
+        elif broker_status == "UNKNOWN":
+            next_missing_detail = "whether the buyer has already approached a broker"
+        elif broker_status == "YES" and not broker_statements:
+            next_missing_detail = "what the broker said about the parcel"
+        elif broker_status == "YES" and not survey_reference and not survey_answered_without_number:
+            next_missing_detail = "the village and survey/subdivision number, if known"
+        elif broker_status == "YES" and not acreage:
+            next_missing_detail = "the parcel area"
+        elif broker_status == "YES" and not asking_price_per_acre and not budget:
+            next_missing_detail = "the broker's quoted total or per-acre price"
+        elif broker_status == "YES" and not land_type:
+            next_missing_detail = "the stated land type"
+        elif broker_status == "YES" and not document_analyses and not documents and not document_answered_without_upload:
+            next_missing_detail = "the documents the broker supplied, if any"
+        elif broker_status == "NO" and not land_type:
+            next_missing_detail = "land type"
+        elif broker_status == "NO" and not acreage:
+            next_missing_detail = "required acreage"
+        elif broker_status == "NO" and not budget:
+            next_missing_detail = "approximate budget"
+        elif broker_status == "NO" and not buyer_preferences:
+            next_missing_detail = "road, water, electricity, and nearby-facility preferences"
         else:
-            # Default to Plot 4 if questions mention safety or metro, or bv-hyd-01
-            if "safe" in q or "metro" in q:
-                target_land = next((l for l in available_lands if l.id == "bv-hyd-04"), None)
-                matched_ids = ["bv-hyd-04"]
-            else:
-                target_land = next((l for l in available_lands if l.id == "bv-hyd-01"), None)
-                matched_ids = ["bv-hyd-01"]
-
-        if not target_land and available_lands:
-            target_land = available_lands[0]
-            matched_ids = [target_land.id]
-
-        is_disputed = target_land and "disputed" in target_land.legal_status.lower()
-        overall_risk = "CRITICAL" if is_disputed else "LOW"
-
-        # Construct Dialogue for the 4 Characters in requested conversation language
-        dialogue: List[CharacterSpeechItem] = []
-
-        if lang == "te":
-            # TELUGU
-            dialogue.append(CharacterSpeechItem(
-                character="bhoomi",
-                character_name="Bhoomi (భూమి)",
-                role="Chief Land Intelligence Guide",
-                text=f"నమస్కారం! నేను భూమి. మీ విచారణ కోసం {target_land.title} ({target_land.survey_number}, {target_land.acres} ఎకరాలు, {target_land.location}) రికార్డులను పరిశీలించాను. మా బృంద సభ్యులు ఇన్ఫ్రా, న్యాయ మరియు అమ్మతో కలిసి సమగ్ర నివేదిక అందిస్తున్నాను.",
-                voice_id="Nalini",
-                evidence_badge="Dossier Retrieved: " + target_land.survey_number,
-                sentiment="welcoming",
-                animation_cue="speak"
-            ))
-
-            dialogue.append(CharacterSpeechItem(
-                character="infra",
-                character_name="Infra (ఇన్ఫ్రా)",
-                role="Infrastructure Explorer",
-                text="మౌలిక సదుపాయాల పరిశీలన: బ్రోకర్ చెబుతున్న మెట్రో లైన్ వాదన అధికారిక HMRL మాస్టర్ ప్లాన్‌లో లేదు. ఇది కేవలం ధృవీకరించబడని మార్కెటింగ్ క్లెయిమ్. అయితే ఆర్.ఆర్.ఆర్ (RRR) కారిడార్ కేంద్ర గెజిట్ ద్వారా అధికారికంగా ఆమోదించబడింది.",
-                voice_id="Kabir",
-                evidence_badge="HMRL Master Plan 2031 & NHAI Gazette",
-                sentiment="analytical",
-                animation_cue="explain"
-            ))
-
-            if is_disputed:
-                dialogue.append(CharacterSpeechItem(
-                    character="nyaya",
-                    character_name="Nyaya (న్యాయ)",
-                    role="Legal Title Detective",
-                    text="తీవ్ర హెచ్చరిక! ఈ భూమిపై తెలంగాణ గ్రామీణ బ్యాంకులో ₹85 లక్షల తాకట్టు రుణం (Loan A/c TG-AGRI-8832-MOCK) ఇంకా పెండింగ్‌లో ఉంది. అంతేకాకుండా మేడ్చల్ కోర్టులో వారసత్వ పంపకాల వివాదం OS No. 412/2022 నడుస్తోంది. రిజిస్టర్డ్ బ్యాంక్ NOC లేకుండా కొనడం చట్టరీత్యా చాలా ప్రమాదకరం.",
-                    voice_id="Aditya",
-                    evidence_badge="Encumbrance Form 15 & OS 412/2022",
-                    sentiment="alarmed",
-                    animation_cue="alert"
-                ))
-                dialogue.append(CharacterSpeechItem(
-                    character="amma",
-                    character_name="Amma (అమ్మ)",
-                    role="Buyer's Guardian",
-                    text="నాయనా, ఇది నీ కష్టార్జితం! బ్రోకర్లు మాటలు నమ్మి ఒక్క రూపాయి కూడా అడ్వాన్స్ ఇవ్వవద్దు. బ్యాంక్ క్లియరెన్స్ వచ్చి, కోర్టు వివాదం తేలేంత వరకు ఎటువంటి అగ్రిమెంట్ చేసుకోవద్దు. అర్హతగల హైకోర్టు న్యాయవాదిని సంప్రదించి మాత్రమే ముందుకు వెళ్లు.",
-                    voice_id="Kalyani",
-                    evidence_badge="Family Financial Protection Advisory",
-                    sentiment="protective",
-                    animation_cue="comfort"
-                ))
-            else:
-                dialogue.append(CharacterSpeechItem(
-                    character="nyaya",
-                    character_name="Nyaya (న్యాయ)",
-                    role="Legal Title Detective",
-                    text="లీగల్ పరిశీలన: ధరణి రికార్డుల ప్రకారం గత 30 సంవత్సరాల లింక్ డాక్యుమెంట్లు సక్రమంగా ఉన్నాయి. సెక్షన్ 22-A నిషేధిత జాబితాలో లేదు మరియు ఎలాంటి బ్యాంక్ తాకట్టులు నమోదు కాలేదు. ఇది క్లీన్ టైటిల్ హోల్డింగ్.",
-                    voice_id="Aditya",
-                    evidence_badge="30-Yr Clean Title Search",
-                    sentiment="analytical",
-                    animation_cue="explain"
-                ))
-                dialogue.append(CharacterSpeechItem(
-                    character="amma",
-                    character_name="Amma (అమ్మ)",
-                    role="Buyer's Guardian",
-                    text="చాలా సంతోషం నాయనా, టైటిల్ రికార్డులు శుభ్రంగా ఉన్నాయి. అయినా రిజిస్ట్రేషన్‌కు ముందు మండల సర్వేయర్ ద్వారా F-లైన్ ఫిజికల్ సర్వే చేయించి సరిహద్దు రాళ్లు నిర్ధారించుకోండి.",
-                    voice_id="Kalyani",
-                    evidence_badge="Precautionary Boundary Survey",
-                    sentiment="protective",
-                    animation_cue="comfort"
-                ))
-
-        elif lang == "hi":
-            # HINDI
-            dialogue.append(CharacterSpeechItem(
-                character="bhoomi",
-                character_name="Bhoomi (भूमि)",
-                role="Chief Land Intelligence Guide",
-                text=f"नमस्ते! मैं भूमि हूं। आपकी जांच के लिए मैंने {target_land.title} ({target_land.survey_number}, {target_land.acres} एकड़, {target_land.location}) के रिकॉर्ड की पड़ताल की है। हमारी टीम इन्फ्रा, न्याय और अम्मा मिलकर पूरी सच्चाई आपके सामने ला रहे हैं।",
-                voice_id="Nalini",
-                evidence_badge="Dossier: " + target_land.survey_number,
-                sentiment="welcoming",
-                animation_cue="speak"
-            ))
-
-            dialogue.append(CharacterSpeechItem(
-                character="infra",
-                character_name="Infra (इन्फ्रा)",
-                role="Infrastructure Explorer",
-                text="इन्फ्रास्ट्रक्चर जांच: ब्रोकर द्वारा मेट्रो का दावा आधिकारिक HMRL मास्टर प्लान में कहीं भी दर्ज नहीं है। यह गैर-प्रमाणित दावा है। हालांकि रीजनल रिंग रोड (RRR) कॉरिडोर सरकारी गजट द्वारा अधिसूचित है।",
-                voice_id="Kabir",
-                evidence_badge="HMRL DPR & Gazette Search",
-                sentiment="analytical",
-                animation_cue="explain"
-            ))
-
-            if is_disputed:
-                dialogue.append(CharacterSpeechItem(
-                    character="nyaya",
-                    character_name="Nyaya (न्याय)",
-                    role="Legal Title Detective",
-                    text="गंभीर कानूनी चेतावनी! इस भूमि पर तेलंगाना ग्रामीण बैंक का ₹85 लाख का अनिस्तारित बंधक (Loan TG-AGRI-8832-MOCK) दर्ज है। इसके अतिरिक्त मेदचल उप-अदालत में पारिवारिक उत्तराधिकार का दीवानी वाद OS 412/2022 लंबित है।",
-                    voice_id="Aditya",
-                    evidence_badge="Bank Hypothecation & Civil Suit",
-                    sentiment="alarmed",
-                    animation_cue="alert"
-                ))
-                dialogue.append(CharacterSpeechItem(
-                    character="amma",
-                    character_name="Amma (अम्मा)",
-                    role="Buyer's Guardian",
-                    text="बेटा, यह तुम्हारी गाढ़ी कमाई है! ब्रोकर के मीठे शब्दों में आकर कोई टोकन एडवांस मत देना। जब तक बैंक का पूरा एनओसी न मिले और कोर्ट केस खत्म न हो, एक भी कागज पर दस्तखत मत करना।",
-                    voice_id="Kalyani",
-                    evidence_badge="Buyer Family Safeguard",
-                    sentiment="protective",
-                    animation_cue="comfort"
-                ))
-            else:
-                dialogue.append(CharacterSpeechItem(
-                    character="nyaya",
-                    character_name="Nyaya (न्याय)",
-                    role="Legal Title Detective",
-                    text="कानूनी स्थिति: धरणी और राजस्व रिकॉर्ड में 30 वर्षों का स्पष्ट उत्तराधिकार इतिहास है। कोई बैंक ऋण या न्यायालयीन स्थगन आदेश नहीं है। यह एक साफ रिकॉर्ड वाली संपत्ति है।",
-                    voice_id="Aditya",
-                    evidence_badge="Form 15 Zero Encumbrance",
-                    sentiment="analytical",
-                    animation_cue="explain"
-                ))
-                dialogue.append(CharacterSpeechItem(
-                    character="amma",
-                    character_name="Amma (अम्मा)",
-                    role="Buyer's Guardian",
-                    text="दस्तावेज अच्छे हैं बेटा। फिर भी टोकन से पहले मंडल सर्वेक्षक से सीमांकन (F-Line Demarcation) करवाकर अपनी आंखों से बाउंड्री देख लेना।",
-                    voice_id="Kalyani",
-                    evidence_badge="Physical Verification Advisory",
-                    sentiment="protective",
-                    animation_cue="comfort"
-                ))
-
-        else:
-            # ENGLISH & OTHER REGIONAL FALLBACK
-            dialogue.append(CharacterSpeechItem(
-                character="bhoomi",
-                character_name="Bhoomi",
-                role="Chief Land Intelligence Guide",
-                text=f"Welcome! I am Bhoomi. For your investigation, I retrieved the records for {target_land.title} ({target_land.survey_number}, {target_land.acres} Acres in {target_land.location}). Our specialists Infra, Nyaya, and Amma have cross-examined every evidence point.",
-                voice_id="Nalini",
-                evidence_badge="Dossier: " + target_land.survey_number,
-                sentiment="welcoming",
-                animation_cue="speak"
-            ))
-
-            dialogue.append(CharacterSpeechItem(
-                character="infra",
-                character_name="Infra",
-                role="Infrastructure Explorer",
-                text="Infrastructure audit: The Regional Ring Road (RRR) Highway corridor is OFFICIALLY ANNOUNCED under MoRTH gazette notifications, while direct Metro rail extension to this zone remains an UNVERIFIED marketing claim with zero sanctioned DPR budget.",
-                voice_id="Kabir",
-                evidence_badge="RRR Highway Gazette & HMRL DPR",
-                sentiment="analytical",
-                animation_cue="explain"
-            ))
-
-            if is_disputed:
-                dialogue.append(CharacterSpeechItem(
-                    character="nyaya",
-                    character_name="Nyaya",
-                    role="Legal Title Detective",
-                    text="CRITICAL LEGAL ALERT! WARNING: Plot 4 (Keesara Sunrise Meadows) is NOT SAFE to buy under current circumstances! The Encumbrance Certificate reflects an active, undischarged bank mortgage of ₹85 Lakhs registered with Telangana Grameena Bank (A/c TG-AGRI-8832-MOCK). Additionally, pending civil suit OS 412/2022 in Medchal Sub-Court disputes undivided ancestral succession.",
-                    voice_id="Aditya",
-                    evidence_badge="Bank Lien: ₹85L & OS 412/2022",
-                    sentiment="alarmed",
-                    animation_cue="alert"
-                ))
-                dialogue.append(CharacterSpeechItem(
-                    character="amma",
-                    character_name="Amma",
-                    role="Buyer's Guardian",
-                    text="Listen to me carefully, dear buyer: This is your family's hard-earned wealth. Do NOT transfer any advance or sign an agreement until the bank issues a registered Release Deed and all legal heirs provide certified consent. Always protect your capital first!",
-                    voice_id="Kalyani",
-                    evidence_badge="Guardian Family Capital Protection",
-                    sentiment="protective",
-                    animation_cue="comfort"
-                ))
-            else:
-                dialogue.append(CharacterSpeechItem(
-                    character="nyaya",
-                    character_name="Nyaya",
-                    role="Legal Title Detective",
-                    text="Title audit complete: Form 15 Encumbrance Certificate reflects NIL registered mortgages across 30 years. The land is absent from Government 22-A prohibited property rolls, indicating clean ancestral freehold tenure.",
-                    voice_id="Aditya",
-                    evidence_badge="Form 15: Clean 30-Yr Record",
-                    sentiment="analytical",
-                    animation_cue="explain"
-                ))
-                dialogue.append(CharacterSpeechItem(
-                    character="amma",
-                    character_name="Amma",
-                    role="Buyer's Guardian",
-                    text="The papers look transparent, but remember a golden rule: Always commission a government F-Line physical boundary demarcation through the Mandal Revenue Office before final registration.",
-                    voice_id="Kalyani",
-                    evidence_badge="Mandatory Ground Survey Checklist",
-                    sentiment="protective",
-                    animation_cue="comfort"
-                ))
+            next_missing_detail = None
 
         return {
-            "user_query": query,
-            "conversation_language": lang,
-            "matched_land_ids": matched_ids,
-            "dialogue_sequence": [d.model_dump() for d in dialogue],
-            "model_used": "bhoomivaani-dev-adapter",
-            "provider": "MOCK_DEV_ADAPTER",
-            "is_live": False,
-            "overall_risk_level": overall_risk
+            "buying_intent": buying_intent,
+            "preferred_location": location,
+            "land_type": land_type,
+            "acreage": acreage,
+            "budget": budget,
+            "asking_price_per_acre": asking_price_per_acre,
+            "broker_status": broker_status,
+            "broker_statements": broker_statements,
+            "documents_discussed": documents,
+            "documents_uploaded": bool(document_analyses),
+            "survey_reference": survey_reference,
+            "concerns": concerns,
+            "buyer_preferences": buyer_preferences,
+            "intended_purpose": intended_purpose,
+            "next_missing_detail": next_missing_detail,
         }
 
-    async def _run_ollama_reasoning(self, query, lang, lands, land_id) -> Dict[str, Any]:
-        """Runs reasoning via local/remote Ollama Qwen3 8B model"""
-        # Strict labeling: provider=QWEN3_OLLAMA, model=qwen3:8b
-        system_instruction = (
-            "You are BhoomiVaani Multi-Character Investigation Engine. "
-            "Characters: Bhoomi (Land Guide), Infra (Infrastructure Explorer), Nyaya (Legal Detective), Amma (Buyer Guardian). "
-            f"Generate dialogue in language '{lang}'. Ground strictly in supplied lands data."
+    async def _run_evon_reasoning(
+        self,
+        query: str,
+        language: str,
+        lands: List[LandListing],
+        land_id: Optional[str],
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        document_analyses: Optional[List[Dict[str, Any]]] = None,
+        endpoint: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        endpoint = endpoint or self._endpoint_url()
+        if endpoint is None:
+            raise ProviderUnavailableError(
+                "Evon reasoning is not configured. Set EVON_API_BASE_URL and EVON_MODEL for an Evon vLLM-compatible inference endpoint."
+            )
+        selected = self._select_land(query, lands, land_id)
+        prompt = {
+            "query": query,
+            "conversation_history": [
+                {"role": item["role"], "content": item["content"]}
+                for item in (conversation_history or [])
+                if item.get("role") in {"user", "assistant"}
+                and isinstance(item.get("content"), str)
+            ],
+            "buyer_context": self._build_buyer_context(
+                query, conversation_history, document_analyses
+            ),
+            "conversation_language": language,
+            "selected_land": selected.model_dump(mode="json") if selected else None,
+            "document_analyses": document_analyses or [],
+            "verified_listing_source_available": False,
+        }
+        language_names = {
+            "en": "English",
+            "te": "Telugu",
+            "hi": "Hindi",
+            "mr": "Marathi",
+            "ta": "Tamil",
+            "kn": "Kannada",
+            "ml": "Malayalam",
+            "bn": "Bengali",
+            "gu": "Gujarati",
+            "pa": "Punjabi",
+        }
+        language_name = language_names.get(language, "English")
+        system_message = (
+            f"You are Bhoomi, a careful land-buying advisor. Reply in {language_name} only, "
+            "regardless of the languages used in earlier turns. Use the supplied conversation as "
+            "the continuing conversation and remember the buyer requirements, broker statements, "
+            "documents, preferences, and concerns in buyer_context. Do not ask again for facts already "
+            "provided. Answer a direct question first; otherwise ask only the single next missing detail. "
+            "Treat documents as user-provided text-pattern scans, not proof of authenticity or legal status. "
+            "Do not greet again on follow-up turns. Treat all included listing information as synthetic "
+            "demonstration data, never official records. Do not claim ownership, clear title, government "
+            "verification, current infrastructure status, or real listing availability. Explain uncertainty, "
+            "identify missing information, and recommend independent official verification. Compare only "
+            "property facts explicitly supplied by the user, and do not invent facts."
         )
         payload = {
-            "model": self.ollama_model,
+            "model": self.model,
             "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": f"Investigate query: {query}. Available lands: {[l.model_dump() for l in lands]}"}
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
             ],
-            "temperature": 0.2
+            "max_tokens": 2048,
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "stream": False,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(self.ollama_url, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                # Parse or wrap with character sequence
-                base = self._deterministic_collaborative_investigation(query, lang, lands, land_id)
-                base["model_used"] = self.ollama_model
-                base["provider"] = "QWEN3_OLLAMA"
-                base["is_live"] = True
-                return base
-            raise ValueError(f"Ollama returned {resp.status_code}")
+        try:
+            async with httpx.AsyncClient(timeout=settings.api_timeout_seconds) as client:
+                response = await client.post(endpoint, json=payload)
+        except httpx.TimeoutException as exc:
+            raise ProviderUnavailableError("Evon inference timed out.") from exc
+        except httpx.HTTPError as exc:
+            logger.warning("Evon inference endpoint could not be reached.")
+            raise ProviderUnavailableError(
+                "Evon inference endpoint could not be reached. Check EVON_API_BASE_URL and the deployment."
+            ) from exc
 
-    async def _run_evon_reasoning(self, query, lang, lands, land_id) -> Dict[str, Any]:
-        """Runs reasoning via live Gnani Evon v3.3 30B API"""
-        # Strict labeling: provider=GNANI_EVON, model=gnani-evon-v3.3-30b-a3b
-        headers = {"X-API-Key-ID": self.gnani_key, "Content-Type": "application/json"}
-        payload = {
-            "model": "gnani-evon-v3.3-30b-a3b",
-            "messages": [
-                {"role": "system", "content": "You are BhoomiVaani's 4-character team: Bhoomi, Infra, Nyaya, and Amma."},
-                {"role": "user", "content": query}
-            ],
-            "temperature": 0.2
+        if response.status_code != 200:
+            logger.warning("Evon inference endpoint returned HTTP %s.", response.status_code)
+            raise ProviderRequestError(
+                f"Evon inference endpoint rejected the request (HTTP {response.status_code}). "
+                "Check EVON_MODEL and the configured deployment."
+            )
+        try:
+            choices = response.json()["choices"]
+            text = choices[0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise ProviderRequestError(
+                "Evon inference returned an invalid OpenAI-compatible chat-completion response."
+            ) from exc
+        if not isinstance(text, str) or not text.strip():
+            raise ProviderRequestError("Evon inference returned an empty response.")
+
+        dialogue = [CharacterSpeechItem(
+            character="bhoomi",
+            character_name="Bhoomi",
+            role="Land-buying advisor",
+            text=text.strip(),
+            voice_id="",
+            evidence_badge="User-provided conversation and synthetic demo records",
+            evidence_type="USER_PROVIDED_AND_SYNTHETIC_DEMONSTRATION_DATA",
+            sentiment="welcoming",
+            animation_cue="explain",
+        ).model_dump()]
+        return {
+            "user_query": query,
+            "conversation_language": language,
+            "matched_land_ids": [selected.id] if selected else [],
+            "dialogue_sequence": dialogue,
+            "model_used": self.model,
+            "provider": "GNANI_EVON",
+            "is_live": True,
+            "overall_risk_level": (
+                "SYNTHETIC_FLAGS_PRESENT" if selected and selected.legal_risks else "NOT_ASSESSED"
+            ),
+            "investigation_report": self._build_case_report(
+                query, conversation_history, selected, document_analyses
+            ),
         }
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(self.evon_url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                base = self._deterministic_collaborative_investigation(query, lang, lands, land_id)
-                base["model_used"] = "gnani-evon-v3.3-30b-a3b"
-                base["provider"] = "GNANI_EVON"
-                base["is_live"] = True
-                return base
-            raise ValueError(f"Evon returned {resp.status_code}")
 
-    # Backward compatibility with single-character legacy chat
-    async def reason(self, query: str, language: str = "te", conversation_history = None, available_lands = None, selected_land_id = None):
-        collab = await self.investigate_collaborative(query, language, available_lands, selected_land_id)
-        # Combine character dialogues into single narrative
-        full_resp = "\n\n".join([f"**{d['character_name']}**: {d['text']}" for d in collab["dialogue_sequence"]])
-        mode_label = "MOCK AI" if not collab.get("is_live") else f"{collab['provider']} ({collab['model_used']})"
+    async def reason(
+        self, query: str, language: str = "te", conversation_history=None,
+        available_lands=None, selected_land_id=None
+    ) -> Dict[str, Any]:
+        investigation = await self.investigate_collaborative(
+            query, language, available_lands, selected_land_id, conversation_history
+        )
+        dialogue = investigation["dialogue_sequence"]
         return {
             "transcript": query,
-            "response": full_resp,
+            "response": "\n\n".join(f"**{item['character_name']}**: {item['text']}" for item in dialogue),
             "language": language,
-            "matched_land_ids": collab["matched_land_ids"],
-            "legal_warnings": [d["text"] for d in collab["dialogue_sequence"] if d["character"] == "nyaya"],
-            "infrastructure_findings": [d["text"] for d in collab["dialogue_sequence"] if d["character"] == "infra"],
-            "growth_insights": [d["text"] for d in collab["dialogue_sequence"] if d["character"] == "bhoomi"],
-            "ai_mode": mode_label
+            "matched_land_ids": investigation["matched_land_ids"],
+            "legal_warnings": [item["text"] for item in dialogue if item["character"] == "nyaya"],
+            "infrastructure_findings": [item["text"] for item in dialogue if item["character"] == "infra"],
+            "growth_insights": [item["text"] for item in dialogue if item["character"] == "bhoomi"],
+            "ai_mode": (
+                f"{investigation['provider']} ({investigation['model_used']})"
+                if investigation["is_live"] else "SYNTHETIC DEMO MODE"
+            ),
         }
+
 
 evon_service = ReasoningService()

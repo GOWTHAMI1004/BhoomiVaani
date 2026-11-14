@@ -1,7 +1,6 @@
 import React from 'react';
 import { 
   MapPin, 
-  ShieldCheck, 
   AlertTriangle, 
   TrendingUp, 
   FileDown, 
@@ -38,7 +37,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
   onDownloadReport
 }) => {
   const t = getTranslation(language);
-  const isClean = land.legal_status.toLowerCase().includes('clean');
+  const hasListedRisks = land.legal_risks.length > 0;
 
   return (
     <div
@@ -113,20 +112,18 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
         {/* Legal Status & Risks */}
         <div className="pt-1">
           <div className={`p-2.5 rounded-xl border flex items-start gap-2 ${
-            isClean
-              ? 'bg-emerald-50/70 border-emerald-200/60 text-emerald-900'
-              : 'bg-rose-50 border-rose-200 text-rose-950'
+            hasListedRisks
+              ? 'bg-rose-50 border-rose-200 text-rose-950'
+              : 'bg-amber-50 border-amber-200 text-amber-950'
           }`}>
-            {isClean ? (
-              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            ) : (
+            {hasListedRisks ? (
               <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-            )}
+            ) : <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />}
             <div className="text-xs">
               <div className="font-bold flex items-center gap-1">
                 <span>{land.legal_status}</span>
               </div>
-              {!isClean && land.legal_risks.length > 0 && (
+              {hasListedRisks && (
                 <p className="text-[11px] text-rose-800 line-clamp-1 mt-0.5 font-medium">
                   {land.legal_risks[0].risk_type}
                 </p>
@@ -153,13 +150,13 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
                   ? 'bg-amber-100 text-amber-800'
                   : 'bg-rose-100 text-rose-800'
               }`}>
-                {land.infrastructure_evidence[0].status}
+                Demo: {land.infrastructure_evidence[0].status}
               </span>
             </div>
           </div>
         )}
 
-        {/* Pricing & Growth Score */}
+        {/* Pricing & Synthetic Demo Index */}
         <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
           <div>
             <div className="text-xs text-gray-500">{t.perAcre}: <span className="font-bold text-gray-800">₹{land.price_per_acre_lakhs} L</span></div>
@@ -168,7 +165,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Growth Score</div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Demo Index · Not a Forecast</div>
             <div className="flex items-center gap-1 justify-end">
               <TrendingUp className="w-3.5 h-3.5 text-amber-600" />
               <span className="text-base font-black text-amber-700 font-serif">{land.growth_score}</span>

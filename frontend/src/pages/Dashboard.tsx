@@ -82,7 +82,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
       // Legal status filter
       if (selectedLegalStatus) {
-        if (selectedLegalStatus === 'clean' && !land.legal_status.toLowerCase().includes('clean')) {
+        if (selectedLegalStatus === 'clean' && land.legal_risks.length > 0) {
           return false;
         }
         if (selectedLegalStatus === 'disputed' && !land.legal_status.toLowerCase().includes('disputed')) {
@@ -226,7 +226,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-bold text-forest-950 font-serif flex items-center gap-2">
-            <span>Verified Demo Land Holdings</span>
+            <span>Synthetic Demo Land Holdings · No Official Verification</span>
             <span className="text-xs bg-forest-100 text-forest-900 font-mono px-2 py-0.5 rounded-full font-bold">
               {filteredLands.length} available
             </span>

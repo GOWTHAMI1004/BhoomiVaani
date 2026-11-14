@@ -1,10 +1,18 @@
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class ClaimCheckRequest(BaseModel):
-    statement: str
+    statement: str = Field(min_length=1, max_length=2000)
     land_id: Optional[str] = None
     language: str = "te"
+
+    @field_validator("statement")
+    @classmethod
+    def statement_must_contain_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Claim statement must contain non-whitespace text.")
+        return value
 
 class ClaimCheckResponse(BaseModel):
     statement: str
@@ -16,4 +24,5 @@ class ClaimCheckResponse(BaseModel):
     explanation: str
     missing_information: str
     caution_note: str
-    ai_mode: str = "MOCK AI"
+    evidence_type: str = "SYNTHETIC_DEMONSTRATION_DATA"
+    ai_mode: str = "RULE_BASED_DEMO"

@@ -2,7 +2,6 @@ import React from 'react';
 import { 
   Scale, 
   X, 
-  ShieldCheck, 
   AlertTriangle, 
   TrendingUp, 
   FileDown, 
@@ -48,7 +47,7 @@ export const ComparisonPage: React.FC<ComparisonPageProps> = ({
                 Side-by-Side Property Comparison Matrix
               </h1>
               <p className="text-xs text-gray-500">
-                Compare price, legal status, and verified infrastructure across up to 3 shortlisted parcels.
+                Compare synthetic demo listings. Their legal and infrastructure entries are not independently verified.
               </p>
             </div>
           </div>
@@ -195,13 +194,13 @@ export const ComparisonPage: React.FC<ComparisonPageProps> = ({
               <tr>
                 <td className="p-4 font-semibold text-gray-500 bg-gray-50/30">Legal Title Status</td>
                 {selectedLands.map(land => {
-                  const isClean = land.legal_status.toLowerCase().includes('clean');
+                  const hasListedRisks = land.legal_risks.length > 0;
                   return (
                     <td key={land.id} className="p-4">
                       <div className={`p-2 rounded-xl border flex items-start gap-1.5 ${
-                        isClean ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'
+                        hasListedRisks ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-amber-50 border-amber-200 text-amber-900'
                       }`}>
-                        {isClean ? <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />}
+                        <AlertTriangle className={`w-4 h-4 shrink-0 ${hasListedRisks ? 'text-rose-600' : 'text-amber-600'}`} />
                         <span className="font-bold text-xs">{land.legal_status}</span>
                       </div>
                     </td>
@@ -209,9 +208,9 @@ export const ComparisonPage: React.FC<ComparisonPageProps> = ({
                 })}
               </tr>
 
-              {/* Legal Risks Identified */}
+              {/* Risks listed in the synthetic records */}
               <tr>
-                <td className="p-4 font-semibold text-gray-500 bg-gray-50/30">Active Encumbrances / Risks</td>
+                <td className="p-4 font-semibold text-gray-500 bg-gray-50/30">Risks Listed in Demo Record</td>
                 {selectedLands.map(land => (
                   <td key={land.id} className="p-4 text-xs">
                     {land.legal_risks.length > 0 ? (
@@ -223,7 +222,7 @@ export const ComparisonPage: React.FC<ComparisonPageProps> = ({
                         ))}
                       </div>
                     ) : (
-                      <span className="text-emerald-700 font-medium">NIL registered encumbrances</span>
+                      <span className="text-amber-800 font-medium">No risks listed in this demo record · unverified</span>
                     )}
                   </td>
                 ))}
@@ -231,7 +230,7 @@ export const ComparisonPage: React.FC<ComparisonPageProps> = ({
 
               {/* Growth Score */}
               <tr>
-                <td className="p-4 font-semibold text-gray-500 bg-gray-50/30">AI Growth Score</td>
+                <td className="p-4 font-semibold text-gray-500 bg-gray-50/30">Synthetic Demo Index</td>
                 {selectedLands.map(land => (
                   <td key={land.id} className="p-4">
                     <div className="flex items-center gap-1 font-bold text-amber-700 font-serif text-base">
@@ -244,7 +243,7 @@ export const ComparisonPage: React.FC<ComparisonPageProps> = ({
 
               {/* Key Infrastructure */}
               <tr>
-                <td className="p-4 font-semibold text-gray-500 bg-gray-50/30">Infrastructure Evidence</td>
+                <td className="p-4 font-semibold text-gray-500 bg-gray-50/30">Synthetic Infrastructure Entries</td>
                 {selectedLands.map(land => (
                   <td key={land.id} className="p-4 space-y-1">
                     {land.infrastructure_evidence.map((inf, idx) => (

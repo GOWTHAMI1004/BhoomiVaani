@@ -1,0 +1,20 @@
+{
+  "name": "BhoomiVaani",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
+  "forwardPorts": [5173, 8000],
+  "portsAttributes": {
+    "5173": {
+      "label": "BhoomiVaani frontend",
+      "onAutoForward": "openBrowser"
+    },
+    "8000": {
+      "label": "BhoomiVaani API",
+      "onAutoForward": "notify"
+    }
+  }
+}

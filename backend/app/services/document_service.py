@@ -79,8 +79,8 @@ class DocumentService:
                     risk_level="CRITICAL",
                     snippet=f"... {snippet} ...",
                     explanation=(
-                        "The document references an outstanding bank loan, hypothecation, or mortgage registered against the property. "
-                        "If the seller defaults, the lending institution retains first charge and can auction the land under the SARFAESI Act."
+                        "The uploaded text contains a reference to a bank loan, hypothecation, or mortgage. "
+                        "This text scan cannot establish whether the entry is current, registered, or discharged."
                     ),
                     lawyer_questions=[
                         "Has the seller obtained an unconditional No Objection Certificate (NOC) and loan closure certificate from the lender?",
@@ -107,9 +107,8 @@ class DocumentService:
                 risk_level="HIGH",
                 snippet=f"... {snippet} ...",
                 explanation=(
-                    "Reference to an active court suit (OS number), court injunction, or succession dispute was detected. "
-                    "Purchasing property under active litigation (Doctrine of Lis Pendens, Section 52 Transfer of Property Act) "
-                    "binds the buyer to the court decree."
+                    "The uploaded text contains a court-suit, injunction, or succession-dispute reference. "
+                    "This scan cannot confirm whether the matter is active; have an advocate check authoritative court records."
                 ),
                 lawyer_questions=[
                     "What is the current status of the civil suit on the e-Courts portal?",
@@ -120,15 +119,15 @@ class DocumentService:
             risk_score += 35
             break
 
-        # 3. Check for Missing Signatures / Unsigned Co-parceners
+        # 3. Flag text patterns that may refer to missing signatures or attachments.
         if "missing" in text_lower or "unsigned" in text_lower or "not attached" in text_lower or "[missing" in text_lower:
             detected_issues.append(DetectedIssue(
                 issue_title="Missing Signatures or Missing Supporting Attachments",
                 risk_level="HIGH",
                 snippet="Clauses indicate missing co-parcener signatures or unattached bank release receipts.",
                 explanation=(
-                    "Key signatories or vital title annexures appear unexecuted or omitted from the deed schedule. "
-                    "Unsigned joint owners can later file to void the conveyance."
+                    "The text scan found terms such as missing, unsigned, or not attached. "
+                    "Review the original document and context with a qualified property advocate."
                 ),
                 lawyer_questions=[
                     "Are all co-owners and lawful title holders signing as Executants before the Sub-Registrar?",
@@ -137,15 +136,22 @@ class DocumentService:
             ))
             risk_score += 20
 
-        # 4. Check for Survey Number Discrepancy / Acreage Variance
-        if any(w in text_lower for w in ["survey variance", "demarcation has not", "acreage difference", "variance", "encroach"]):
+        # 4. Flag references to possible survey or acreage differences without asserting one exists.
+        variance_match = re.search(
+            r"survey variance|demarcation has not|acreage difference|variance|encroach",
+            text_lower,
+        )
+        if variance_match:
+            start = max(0, variance_match.start() - 60)
+            end = min(len(clean_text), variance_match.end() + 120)
+            snippet = clean_text[start:end].strip().replace("\n", " ")
             detected_issues.append(DetectedIssue(
-                issue_title="Cadastral Survey Number or Acreage Discrepancy",
+                issue_title="Possible Survey or Acreage Discrepancy Mentioned",
                 risk_level="MEDIUM",
-                snippet="Variance detected between recorded revenue extent and physical site boundary claims.",
+                snippet=f"... {snippet} ...",
                 explanation=(
-                    "A mismatch exists between the land area recorded in government village revenue records (1-B/Dharani) "
-                    "and the physical field boundary claimed by the seller."
+                    "The uploaded text mentions a possible variance or encroachment. This scan does not compare official "
+                    "revenue records with a physical boundary or establish that a mismatch exists."
                 ),
                 lawyer_questions=[
                     "Can an official revenue demarcation (F-Line petition) be conducted by the Mandal Surveyor prior to token advance?",
@@ -154,16 +160,21 @@ class DocumentService:
             ))
             risk_score += 15
 
-        # 5. Clean Title Check
+        # 5. Surface explicit no-encumbrance statements without treating them as verification.
         if not detected_issues:
-            if "nil" in text_lower and ("mortgage" in text_lower or "encumbrance" in text_lower) and "clean" in text_lower or "pattadar" in text_lower:
+            no_encumbrance_assertion = re.search(
+                r"(?:\b(?:mortgage|encumbrance|lien)\w*\b.{0,40}\b(?:nil|none|not\s+listed|no\s+record)\b"
+                r"|\b(?:nil|none|no\s+record)\b.{0,40}\b(?:mortgage|encumbrance|lien)\w*\b)",
+                text_lower,
+            )
+            if no_encumbrance_assertion:
                 detected_issues.append(DetectedIssue(
-                    issue_title="Clean Title Record Indicators Present",
-                    risk_level="CLEAR",
-                    snippet="30-year encumbrance search reflects NIL registered charges. Prohibited list check: NOT LISTED.",
+                    issue_title="Text Contains an Assertion of No Recorded Encumbrance",
+                    risk_level="LOW",
+                    snippet="The uploaded text contains statements such as NIL or NOT LISTED; they have not been independently checked.",
                     explanation=(
-                        "The document exhibits standard positive markers: zero registered mortgages, clear ancestral devolution, "
-                        "and absence from Government Section 22-A prohibited property lists."
+                        "These are assertions within the uploaded document, not independently verified findings. "
+                        "They do not establish clear title, complete ownership, or a current encumbrance status."
                     ),
                     lawyer_questions=[
                         "Obtain fresh EC (Encumbrance Certificate) from Sub-Registrar covering up to the current registration date.",
@@ -183,8 +194,8 @@ class DocumentService:
             overall_level = "LOW"
 
         summary_msg = (
-            f"Analysis of '{filename}' identified {len(detected_issues)} key legal title items. "
-            f"Overall legal risk status is assessed as {overall_level} (Score {risk_score}/100)."
+            f"A rule-based text scan of '{filename}' found {len(detected_issues)} matching pattern(s). "
+            f"Text-pattern indicator: {overall_level} (score {risk_score}/100). This is not a legal-risk or title assessment."
         )
 
         return DocumentAnalysisResponse(
@@ -196,7 +207,8 @@ class DocumentService:
             summary=summary_msg,
             survey_numbers_found=survey_numbers,
             encumbrance_clauses_found=mortgage_found,
-            ai_mode="MOCK AI"
+            evidence_type="USER_PROVIDED_DOCUMENT_TEXT",
+            ai_mode="RULE_BASED_DOCUMENT_SCAN"
         )
 
 document_service = DocumentService()

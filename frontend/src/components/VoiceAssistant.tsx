@@ -19,6 +19,7 @@ import {
 import { Language, ConversationMessage, AIChatResponse } from '../types';
 import { getTranslation } from '../translations/i18n';
 import { api } from '../services/api';
+import { encodeAudioBufferAsWav } from '../services/audio';
 
 interface VoiceAssistantProps {
   language: Language;
@@ -43,6 +44,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
   const [textInput, setTextInput] = useState('');
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
 
   // History state
   const [messages, setMessages] = useState<ConversationMessage[]>([
@@ -52,8 +54,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
         ? "నమస్కారం! నేను భూమివాణి వాయిస్ అసిస్టెంట్‌ని. తెలంగాణ మరియు హైదరాబాద్ పరిసరాల్లో భూమి వివరాలు, లీగల్ టైటిల్ భద్రత మరియు మౌలిక సదుపాయాల వాస్తవాలను తనిఖీ చేయడానికి మాట్లాడండి లేదా టైప్ చేయండి."
         : language === 'hi'
         ? "नमस्ते! मैं भूमिवाणी वॉयस असिस्टेंट हूं। हैदराबाद व तेलंगाना में कृषि भूमि के कानूनी दस्तावेज, बैंक बकाया और हाईवे दावों की जांच के लिए बोलें या लिखें।"
-        : "Namaste! I am BhoomiVaani, your voice-first land intelligence guide. Ask me about clean agricultural parcels, title safety, or highway infrastructure claims.",
-      ai_mode: "GNANI EVON v3.3 30B",
+        : "Namaste! I am BhoomiVaani, your voice-first land-awareness guide. Ask about a synthetic demo parcel, documents to request, or an unverified infrastructure claim.",
+      ai_mode: "SYNTHETIC DEMO MODE",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -123,8 +125,10 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
     }
   };
 
-  const handleSendQuery = async (queryText: string) => {
+  const handleSendQuery = async (queryText: string, responseLanguage?: Language) => {
     if (!queryText.trim()) return;
+
+    const conversationLanguage = responseLanguage || language;
 
     // Add user message
     const userMsg: ConversationMessage = {
@@ -145,7 +149,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
         content: m.content
       }));
 
-      const res = await api.chatWithEvon(queryText, language, historyPayload);
+      const res = await api.chatWithEvon(queryText, conversationLanguage, historyPayload);
 
       // Trigger highlight of matched lands
       if (res.matched_land_ids && res.matched_land_ids.length > 0) {
@@ -195,55 +199,70 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
         mediaRecorderRef.current.stop();
       }
     } else {
-      // Start recording
+      setVoiceError(null);
       try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          const mediaRecorder = new MediaRecorder(stream);
-          mediaRecorderRef.current = mediaRecorder;
-          audioChunksRef.current = [];
-
-          mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-              audioChunksRef.current.push(event.data);
-            }
-          };
-
-          mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-            stream.getTracks().forEach(track => track.stop());
-
-            // Process STT
-            setIsLoading(true);
-            setLoadingStage('stt');
-            try {
-              const sttRes = await api.transcribeAudio(audioBlob, language);
-              const transcript = sttRes.transcript || t.demo1;
-              handleSendQuery(transcript);
-            } catch (err) {
-              console.warn('STT failed, using language default query:', err);
-              handleSendQuery(t.demo1);
-            }
-          };
-
-          mediaRecorder.start();
-          setIsRecording(true);
-        } else {
-          // Fallback if browser blocks microphone
-          setIsRecording(true);
-          setTimeout(() => {
-            setIsRecording(false);
-            handleSendQuery(t.demo1);
-          }, 2000);
+        if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+          setVoiceError('This browser does not support microphone recording. Type your question instead.');
+          return;
         }
-      } catch (err) {
-        console.warn('Microphone permission denied or not available, falling back to simulated prompt:', err);
-        // Seamless fallback to simulated voice recording
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) audioChunksRef.current.push(event.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          const recording = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType });
+          stream.getTracks().forEach(track => track.stop());
+          if (!recording.size) {
+            setVoiceError('No audio was recorded. Try again or type your question.');
+            return;
+          }
+          setIsLoading(true);
+          setLoadingStage('stt');
+          try {
+            const audioContext = new AudioContext();
+            try {
+              const buffer = await audioContext.decodeAudioData(await recording.arrayBuffer());
+              if (buffer.duration > 30) {
+                setVoiceError('Recordings must be 30 seconds or shorter. Try again.');
+                return;
+              }
+              const { blob, rms } = encodeAudioBufferAsWav(buffer);
+              if (rms < 0.003) {
+                setVoiceError('No speech was detected. Try again or type your question.');
+                return;
+              }
+              const sttRes = await api.transcribeAudio(blob);
+              if (!sttRes.transcript.trim()) {
+                setVoiceError('No transcript was returned. Try recording again.');
+                return;
+              }
+              const detectedLanguage = sttRes.detected_language?.split('-')[0]?.toLowerCase() || language;
+              const nextLanguage = ['en', 'hi', 'te', 'ta', 'kn', 'ml', 'mr', 'bn', 'gu', 'pa'].includes(detectedLanguage)
+                ? detectedLanguage as Language
+                : language;
+              await handleSendQuery(sttRes.transcript, nextLanguage);
+            } finally {
+              await audioContext.close();
+            }
+          } catch (err) {
+            setVoiceError(err instanceof Error ? err.message : 'Speech recognition failed. Try again or type your question.');
+          } finally {
+            setIsLoading(false);
+            setLoadingStage(null);
+          }
+        };
+
+        mediaRecorder.start();
         setIsRecording(true);
-        setTimeout(() => {
-          setIsRecording(false);
-          handleSendQuery(t.demo1);
-        }, 1500);
+      } catch (err) {
+        setVoiceError(err instanceof Error && err.name === 'NotAllowedError'
+          ? 'Microphone access was denied. Allow microphone access or type your question.'
+          : err instanceof Error ? err.message : 'Microphone could not be started.');
       }
     }
   };
@@ -268,7 +287,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
             <h3 className="font-bold text-sm tracking-tight font-serif flex items-center gap-1.5">
               <span>{t.aiVoiceAssistant}</span>
               <span className="text-[9px] bg-gold/20 text-gold-light border border-gold/40 px-1 py-0.2 rounded font-mono">
-                Evon 30B
+                Demo mode
               </span>
             </h3>
             <p className="text-[11px] text-gray-300">
@@ -430,6 +449,11 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
 
       {/* Voice Mic & Controls Panel */}
       <div className="p-4 bg-white border-t border-ivory-border space-y-3">
+        {voiceError && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900" role="status">
+            {voiceError}
+          </div>
+        )}
         {/* Animated Microphone Action */}
         <div className="flex flex-col items-center justify-center py-1">
           <div className="relative">
@@ -461,7 +485,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
             <span className={`text-xs font-bold ${isRecording ? 'text-rose-600 animate-pulse' : 'text-gray-700'}`}>
               {isRecording ? t.listening : t.pressToSpeak}
             </span>
-            <div className="text-[10px] text-gray-400 font-mono">Gnani Prisma v2.5 STT</div>
+            <div className="text-[10px] text-gray-400 font-mono">Gnani Prisma v2.5 · real provider required</div>
           </div>
         </div>
 

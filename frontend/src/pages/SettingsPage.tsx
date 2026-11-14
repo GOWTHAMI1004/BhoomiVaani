@@ -53,7 +53,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             ? 'bg-amber-100 text-amber-900 border-amber-300' 
             : 'bg-emerald-100 text-emerald-900 border-emerald-300'
         }`}>
-          {mockMode ? 'SIMULATION / MOCK MODE' : 'LIVE GNANI STACK'}
+          {mockMode ? 'SYNTHETIC DEMO MODE' : 'PROVIDERS CONFIGURED PER BACKEND'}
         </span>
       </div>
 
@@ -61,7 +61,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       <div className="bg-white rounded-3xl p-6 md:p-8 border border-ivory-border shadow-soft space-y-4">
         <h2 className="text-base font-bold text-forest-950 font-serif flex items-center gap-2">
           <Cpu className="w-5 h-5 text-forest-800" />
-          <span>Mandatory Gnani AI Integrated Pipeline</span>
+          <span>Speech and reasoning providers</span>
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
@@ -72,7 +72,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-forest-100 text-forest-900 font-bold">STT</span>
             </div>
             <p className="text-gray-600 leading-relaxed">
-              Real-time multilingual Speech-to-Text supporting Telugu (te-IN), Hindi (hi-IN), and Indian English with code-mixing.
+              Short-recording transcription through Gnani Prisma v2.5 when credentials are configured. Mock mode does not generate transcripts.
             </p>
             <div className="text-[11px] font-mono text-gray-500 pt-1">
               Endpoint: <span className="text-forest-900">https://api.vachana.ai/stt/v3</span>
@@ -86,10 +86,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-gold/20 text-gold-dark font-bold">REASONING</span>
             </div>
             <p className="text-gray-600 leading-relaxed">
-              30B parameter sovereign foundation model (Artha AI stack) for deterministic land legal reasoning and grounding.
+              No hosted Evon API is configured. The app can call the actual configured Qwen3 model through Ollama; otherwise it uses a clearly labeled synthetic demo adapter.
             </p>
             <div className="text-[11px] font-mono text-gray-500 pt-1">
-              Model: <span className="text-forest-900">gnani-evon-v3.3-30b-a3b</span>
+              Model: <span className="text-forest-900">Qwen3/Ollama or synthetic demo rules</span>
             </div>
           </div>
 
@@ -100,10 +100,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-forest-100 text-forest-900 font-bold">TTS</span>
             </div>
             <p className="text-gray-600 leading-relaxed">
-              Natural Indian voice synthesis across Indic dialects with speed, pitch, and accent modulation.
+              Gnani Timbre v2.5 speech synthesis when credentials are configured. Mock mode returns no fabricated audio.
             </p>
             <div className="text-[11px] font-mono text-gray-500 pt-1">
-              Voice: <span className="text-forest-900">Nalini / Indic Multi-voice</span>
+              Voices: <span className="text-forest-900">Language-specific catalog voices</span>
             </div>
           </div>
         </div>
@@ -120,13 +120,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           {/* Active Language */}
           <div className="p-4 rounded-2xl border border-gray-200 flex items-center justify-between">
             <div>
-              <div className="font-bold text-gray-800">Primary Interaction Language</div>
-              <div className="text-gray-500 mt-0.5">Affects voice prompts, dashboard text and AI responses</div>
+              <div className="font-bold text-gray-800">Interface Language</div>
+              <div className="text-gray-500 mt-0.5">Conversation language is selected independently in the investigation studio</div>
             </div>
             <select
               value={language}
               onChange={(e) => setLanguage(e.target.value as Language)}
-              aria-label="Select primary interaction language"
+              aria-label="Select interface language"
               className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-forest-900 bg-ivory-dark focus:outline-none"
             >
               <option value="te">తెలుగు (Telugu)</option>
@@ -168,9 +168,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <strong>Prototype Compliance Note:</strong> BhoomiVaani utilizes exactly 6 synthetic property listings situated in Chevella, Vikarabad, Shadnagar, Keesara, Yadadri, and Narsapur.
           </p>
           <ul className="list-disc list-inside space-y-1 text-amber-800">
-            <li>5 Clean-Document Examples with simulated Dharani passbook extracts and NIL encumbrances.</li>
-            <li>1 Disputed Property (Plot 4, Keesara, SY-104/MOCK) illustrating active undischarged bank mortgage and co-parcenary litigation.</li>
-            <li>All infrastructure claims are classified as: Officially announced, Proposed, Under construction, Operational, or Unverified claim.</li>
+            <li>5 demo listings have no risk entry in the example dataset; none has been officially title-verified.</li>
+            <li>1 disputed scenario (Plot 4, Keesara, SY-104/MOCK) demonstrates mortgage and inheritance risk indicators; it is not a real parcel.</li>
+            <li>All infrastructure references are synthetic examples and have not been independently checked against government records.</li>
           </ul>
         </div>
       </div>

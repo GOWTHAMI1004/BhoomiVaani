@@ -27,6 +27,7 @@ export const ClaimChecker: React.FC<ClaimCheckerProps> = ({ lands, language }) =
   const [selectedLandId, setSelectedLandId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<ClaimCheckResponse | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const sampleStatements = [
     {
@@ -57,12 +58,14 @@ export const ClaimChecker: React.FC<ClaimCheckerProps> = ({ lands, language }) =
 
     if (!text.trim()) return;
 
+    setErrorMessage('');
+    setResult(null);
     setIsLoading(true);
     try {
       const res = await api.checkClaim(text, landId || undefined, language);
       setResult(res);
     } catch (err) {
-      console.error('Claim check error:', err);
+      setErrorMessage(err instanceof Error ? err.message : 'Claim review failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -115,10 +118,19 @@ export const ClaimChecker: React.FC<ClaimCheckerProps> = ({ lands, language }) =
               Broker Infrastructure & Claim Checker
             </h1>
             <p className="text-xs text-gray-500">
-              Cross-examine verbal promises, upcoming highways, or metro announcements against verified statutory archives.
+              Compare a broker statement with synthetic demo entries. No government portals or official archives are queried.
             </p>
           </div>
         </div>
+
+        {errorMessage && (
+          <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center justify-between gap-3" role="alert">
+            <span>{errorMessage}</span>
+            <button type="button" className="font-bold underline" onClick={() => void handleCheck()}>
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* Input Form */}
         <div className="pt-4 space-y-3">
@@ -161,11 +173,11 @@ export const ClaimChecker: React.FC<ClaimCheckerProps> = ({ lands, language }) =
               {isLoading ? (
                 <>
                   <Sparkles className="w-4 h-4 animate-spin text-gold" />
-                  <span>Verifying via Evon 30B...</span>
+                  <span>Comparing with synthetic demo records...</span>
                 </>
               ) : (
                 <>
-                  <span>Verify Claim Now</span>
+                  <span>Review Demo Evidence</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -203,7 +215,7 @@ export const ClaimChecker: React.FC<ClaimCheckerProps> = ({ lands, language }) =
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
             <div>
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-gray-400">
-                Verification Verdict
+                Demo Review Status
               </span>
               <div className="mt-1">
                 {getStatusBadge(result.verification_status)}
@@ -230,7 +242,7 @@ export const ClaimChecker: React.FC<ClaimCheckerProps> = ({ lands, language }) =
           <div>
             <h4 className="text-xs uppercase tracking-wider font-bold text-gray-500 mb-1.5 flex items-center gap-1.5">
               <Milestone className="w-4 h-4 text-forest-800" />
-              <span>Available Statutory Evidence & Public Records:</span>
+              <span>Available Synthetic Demo Entries:</span>
             </h4>
             <p className="text-xs text-gray-800 bg-gray-50 p-3.5 rounded-xl border border-gray-200/80 leading-relaxed font-mono">
               {result.available_evidence}

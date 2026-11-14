@@ -1,4 +1,7 @@
 export type Language = 'te' | 'hi' | 'en';
+export type ConversationLanguage = 'te' | 'hi' | 'en' | 'ta' | 'kn' | 'ml' | 'mr' | 'bn' | 'gu' | 'pa';
+export type InvestigationCharacter = 'bhoomi' | 'nyaya' | 'infra' | 'amma';
+export type CharacterState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 export interface Coordinates {
   lat: number;
@@ -45,6 +48,7 @@ export interface LandStats {
   clean_document_examples: number;
   risk_flagged_properties: number;
   average_growth_score: number;
+  records_without_listed_risks?: number;
   districts: string[];
   land_types: string[];
 }
@@ -72,7 +76,92 @@ export interface AIChatResponse {
   growth_insights: string[];
   audio_base64?: string;
   audio_available: boolean;
+  audio_error?: string;
   ai_mode: string;
+}
+
+export interface CharacterSpeechItem {
+  character: InvestigationCharacter;
+  character_name: string;
+  role: string;
+  text: string;
+  voice_id: string;
+  audio_base64?: string | null;
+  audio_error?: string | null;
+  duration_sec: number;
+  evidence_badge: string;
+  evidence_type: string;
+  sentiment: string;
+  animation_cue: string;
+}
+
+export interface InvestigationReport {
+  property: {
+    id: string | null;
+    name: string;
+    location: string;
+    district: string;
+    survey_reference: string;
+    area_acres: number | null;
+    asking_price_lakhs: number | null;
+    land_type: string;
+  };
+  ownership_and_title: { status: string; detail: string };
+  document_analysis: { status: string; detail: string };
+  encumbrance_indicators: Array<{
+    risk_type: string;
+    severity: string;
+    description: string;
+    recommended_action: string;
+  }>;
+  survey_and_boundary: { status: string; detail: string };
+  infrastructure: InfrastructureEvidence[];
+  potential_risks: LegalRiskItem[];
+  broker_claims?: Array<{
+    claim: string;
+    status: string;
+    evidence: string;
+    missing_information: string[];
+    required_checks: string[];
+  }>;
+  claim_verification?: { status: string; detail: string };
+  missing_documents: string[];
+  recommended_next_steps: string[];
+  evidence_classification: string;
+  confidence: string;
+  disclaimer: string;
+}
+
+export interface CollaborativeInvestigation {
+  user_query: string;
+  conversation_language: ConversationLanguage;
+  matched_land_ids: string[];
+  dialogue_sequence: CharacterSpeechItem[];
+  model_used: string;
+  provider: string;
+  is_live: boolean;
+  overall_risk_level: string;
+  investigation_report?: InvestigationReport | null;
+}
+
+export interface ModelStatusItem {
+  model_name: string;
+  provider: string;
+  role: 'STT' | 'REASONING' | 'TTS';
+  connection_status: string;
+  is_live: boolean;
+  supported_languages: string[];
+  note: string;
+}
+
+export interface ModelsHealth {
+  active_reasoning_provider: string;
+  prisma_stt: ModelStatusItem;
+  reasoning: ModelStatusItem;
+  timbre_tts: ModelStatusItem;
+  all_live: boolean;
+  mock_mode: boolean;
+  available_conversation_languages: ConversationLanguage[];
 }
 
 export interface ClaimCheckResponse {

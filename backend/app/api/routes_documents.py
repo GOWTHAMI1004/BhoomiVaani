@@ -65,7 +65,7 @@ def get_sample_documents() -> List[Dict[str, Any]]:
                     "id": fname,
                     "filename": fname,
                     "title": fname.replace("_", " ").replace(".txt", "").replace(".pdf", "").title(),
-                    "type": "Disputed / Warning Sample" if is_disputed else "Clean Title Sample",
+                    "type": "Disputed / Warning Sample" if is_disputed else "Synthetic Document Sample",
                     "size_bytes": fpath.stat().st_size
                 })
     return samples
@@ -75,8 +75,9 @@ def get_sample_document_content(sample_id: str):
     """
     Fetches the content of a synthetic sample document.
     """
-    fpath = SAMPLE_DOCS_DIR / sample_id
-    if not fpath.exists() or not fpath.is_file():
+    sample_root = SAMPLE_DOCS_DIR.resolve()
+    fpath = (sample_root / sample_id).resolve()
+    if fpath.parent != sample_root or not fpath.is_file():
         raise HTTPException(status_code=404, detail="Sample document not found.")
 
     with open(fpath, "r", encoding="utf-8", errors="replace") as f:

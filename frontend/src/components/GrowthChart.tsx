@@ -9,7 +9,7 @@ import {
   CartesianGrid, 
   Legend 
 } from 'recharts';
-import { TrendingUp, AlertTriangle, ShieldCheck, Milestone, Info } from 'lucide-react';
+import { TrendingUp, AlertTriangle, Milestone, Info } from 'lucide-react';
 import { LandListing, Language } from '../types';
 import { getTranslation } from '../translations/i18n';
 
@@ -26,15 +26,15 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
   const selectedLand = lands.find(l => l.id === selectedLandId) || lands[0];
   if (!selectedLand) return null;
 
-  // Generate synthetic illustrative scenario projections based on growth score and legal risks
+  // Generate example arithmetic from synthetic fields; this is not a forecast.
   const basePrice = selectedLand.price_per_acre_lakhs;
   const isDisputed = selectedLand.legal_status.toLowerCase().includes('disputed');
 
-  // Baseline simulated appreciation rate (e.g. 10-15% for clean infrastructure lands, -2% to 2% for disputed parcels)
+  // Rates are fixed demonstration assumptions, not market or infrastructure estimates.
   const conservativeRate = isDisputed ? 0.02 : (selectedLand.growth_score / 100) * 0.10;
   const acceleratedRate = isDisputed ? 0.04 : (selectedLand.growth_score / 100) * 0.16;
 
-  const currentYear = 2024;
+  const currentYear = new Date().getFullYear();
   const yearsCount = timeframe === '3yr' ? 3 : 5;
 
   const projectionData = [];
@@ -44,7 +44,7 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
     const accelVal = +(basePrice * Math.pow(1 + acceleratedRate, i)).toFixed(1);
 
     projectionData.push({
-      year: i === 0 ? 'Current (2024)' : `Year +${i} (${yr})`,
+      year: i === 0 ? `Current (${currentYear})` : `Year +${i} (${yr})`,
       conservative: consVal,
       accelerated: accelVal,
       base: basePrice
@@ -60,10 +60,10 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
             <div className="w-8 h-8 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700">
               <TrendingUp className="w-5 h-5" />
             </div>
-            <h2 className="text-xl font-bold text-forest-950 font-serif">Land Growth & Infrastructure Insights</h2>
+            <h2 className="text-xl font-bold text-forest-950 font-serif">Illustrative Value Scenarios · Synthetic Demo</h2>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Evaluate how confirmed infrastructure corridors influence parcel appreciation scenarios.
+            Formula-based examples using synthetic listing values; no market or infrastructure analysis is performed.
           </p>
         </div>
 
@@ -108,13 +108,13 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
       {/* Selected Property Quick Spec Banner */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-ivory-dark/40 p-4 rounded-2xl border border-ivory-border text-xs">
         <div>
-          <span className="text-gray-500">Current Valuation:</span>
+          <span className="text-gray-500">Synthetic Demo Asking Price:</span>
           <div className="text-base font-black text-forest-950 font-serif">
             ₹{selectedLand.price_per_acre_lakhs} <span className="text-xs font-sans font-normal text-gray-600">Lakhs/Acre</span>
           </div>
         </div>
         <div>
-          <span className="text-gray-500">AI Growth Score:</span>
+          <span className="text-gray-500">Synthetic Demo Index:</span>
           <div className="text-base font-black text-amber-700 font-serif">
             {selectedLand.growth_score} <span className="text-xs font-sans font-normal text-gray-400">/ 100</span>
           </div>
@@ -124,8 +124,8 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
           <div className={`font-bold flex items-center gap-1 ${
             !isDisputed ? 'text-emerald-700' : 'text-rose-600'
           }`}>
-            {!isDisputed ? <ShieldCheck className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-            <span>{!isDisputed ? 'Clean Title' : 'Litigation / Lien'}</span>
+            <AlertTriangle className="w-4 h-4" />
+            <span>{isDisputed ? 'Listed demo risks' : 'Title not verified'}</span>
           </div>
         </div>
         <div>
@@ -172,7 +172,7 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
             <Area
               type="monotone"
               dataKey="accelerated"
-              name="Infrastructure Acceleration Scenario"
+              name="Higher assumed growth (synthetic)"
               stroke="#15803D"
               strokeWidth={2.5}
               fillOpacity={1}
@@ -181,7 +181,7 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
             <Area
               type="monotone"
               dataKey="conservative"
-              name="Conservative Baseline Scenario"
+              name="Lower assumed growth (synthetic)"
               stroke="#D97706"
               strokeWidth={2}
               fillOpacity={1}
@@ -197,13 +197,13 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
         <div className="bg-emerald-50/60 border border-emerald-200/80 p-4 rounded-2xl text-xs space-y-2">
           <div className="font-bold text-emerald-950 flex items-center gap-1.5 text-sm">
             <Milestone className="w-4 h-4 text-emerald-700" />
-            <span>Infrastructure Value Drivers</span>
+            <span>Synthetic Infrastructure Entries</span>
           </div>
           <ul className="space-y-1.5 text-emerald-900">
             {selectedLand.infrastructure_evidence.map((inf, idx) => (
               <li key={idx} className="flex items-start justify-between gap-2">
                 <span>• {inf.claim} ({inf.distance_km} km)</span>
-                <span className="font-bold shrink-0">{inf.status}</span>
+                <span className="font-bold shrink-0">Demo: {inf.status}</span>
               </li>
             ))}
           </ul>
@@ -225,7 +225,7 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
             </ul>
           ) : (
             <p className="text-amber-900">
-              Clear 30-year ancestral devolution and zero encumbrances provide maximum market liquidity and straightforward registration.
+              No risk entries are listed in this synthetic record. Title, ownership, encumbrances, and market liquidity have not been assessed.
             </p>
           )}
         </div>
@@ -235,7 +235,7 @@ export const GrowthChart: React.FC<GrowthChartProps> = ({ lands, language }) => 
       <div className="p-3 bg-ivory-dark border border-ivory-border rounded-xl flex items-start gap-2 text-xs text-gray-500">
         <Info className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
         <p className="leading-relaxed">
-          <strong>STATUTORY NOTICE:</strong> Projections displayed above represent illustrative mathematical scenarios derived from historical regional growth patterns and synthetic infrastructure models. They DO NOT constitute a prediction, guarantee, or investment return commitment. Land values may fluctuate due to policy amendments, macro conditions, and acquisition orders.
+          <strong>DEMO NOTICE:</strong> Values above are arithmetic examples using the listing's synthetic price and demo index plus fixed assumed rates. They do not use historical market data or verified infrastructure facts and are not valuations, forecasts, or investment advice.
         </p>
       </div>
     </div>

@@ -15,14 +15,16 @@ class LandService:
         try:
             with open(LANDS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                if not isinstance(data, list) or not data:
+                    raise ValueError("land dataset must be a non-empty JSON list")
                 self._lands = [LandListing(**item) for item in data]
                 logger.info(f"Loaded {len(self._lands)} synthetic land listings from {LANDS_FILE}")
         except Exception as e:
-            logger.error(f"Failed to load lands data: {str(e)}")
-            self._lands = []
+            logger.exception("Failed to load land dataset from %s", LANDS_FILE)
+            raise RuntimeError(f"Unable to load required land dataset: {LANDS_FILE}") from e
 
     def get_all(self, params: Optional[LandFilterParams] = None) -> List[LandListing]:
-        results = self._lands
+        results = self._lands.copy()
 
         if not params:
             return results
@@ -73,12 +75,14 @@ class LandService:
 
     def get_stats(self) -> Dict[str, Any]:
         total = len(self._lands)
-        clean_count = sum(1 for l in self._lands if "clean" in l.legal_status.lower())
+        clean_count = sum(1 for l in self._lands if not l.legal_risks)
         disputed_count = sum(1 for l in self._lands if len(l.legal_risks) > 0 or "disputed" in l.legal_status.lower())
         avg_growth = round(sum(l.growth_score for l in self._lands) / total, 1) if total > 0 else 0
 
         return {
             "total_properties": total,
+            "records_without_listed_risks": clean_count,
+            # Kept for older clients; this is not a title or document verification count.
             "clean_document_examples": clean_count,
             "risk_flagged_properties": disputed_count,
             "average_growth_score": avg_growth,

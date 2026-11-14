@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, ShieldCheck, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Layers, Info, AlertTriangle, TrendingUp } from 'lucide-react';
 import { LandStats, Language } from '../types';
 import { getTranslation } from '../translations/i18n';
 
@@ -26,13 +26,13 @@ export const StatsBar: React.FC<StatsBarProps> = ({ stats, language }) => {
         </div>
       </div>
 
-      {/* Clean Title */}
+      {/* Records without listed risks */}
       <div className="bg-white rounded-2xl p-4 border border-ivory-border shadow-soft flex items-center gap-3.5">
-        <div className="w-12 h-12 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
-          <ShieldCheck className="w-6 h-6" />
+        <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+          <Info className="w-6 h-6" />
         </div>
         <div>
-          <div className="text-2xl font-black text-emerald-800 font-serif">{stats.clean_document_examples}</div>
+          <div className="text-2xl font-black text-amber-800 font-serif">{stats.records_without_listed_risks ?? stats.clean_document_examples}</div>
           <div className="text-xs text-gray-500 font-medium">{t.cleanDocuments}</div>
         </div>
       </div>
@@ -55,7 +55,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({ stats, language }) => {
         </div>
         <div>
           <div className="text-2xl font-black text-amber-800 font-serif">{stats.average_growth_score}<span className="text-xs text-gray-400 font-sans font-normal">/100</span></div>
-          <div className="text-xs text-gray-500 font-medium">{t.avgGrowthScore}</div>
+          <div className="text-xs text-gray-500 font-medium">Synthetic demo index</div>
         </div>
       </div>
     </div>

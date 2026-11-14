@@ -2,13 +2,50 @@ import {
   LandListing,
   LandStats,
   AIChatResponse,
+  CollaborativeInvestigation,
+  ConversationLanguage,
   ClaimCheckResponse,
   DocumentAnalysisResponse,
   SampleDocumentItem,
-  Language
+  Language,
+  ModelsHealth
 } from '../types';
 
 const API_BASE = '/api';
+const BACKEND_STARTUP_GUIDANCE = 'Start the API and frontend together from the repository root with `python start.py`, or run FastAPI on port 8000.';
+
+async function responseError(response: Response, action: string): Promise<Error> {
+  const body = await response.text().catch(() => '');
+  if (
+    response.status === 500
+    && response.headers.get('content-type')?.includes('text/plain')
+    && !body.trim()
+  ) {
+    return new Error(`FastAPI is unreachable through the Vite proxy (HTTP 500). ${BACKEND_STARTUP_GUIDANCE}`);
+  }
+  if (body) {
+    try {
+      const parsed = JSON.parse(body);
+      if (typeof parsed.detail === 'string') return new Error(parsed.detail);
+    } catch {
+      if (/http proxy error|econnrefused|connect econnrefused/i.test(body)) {
+        return new Error(`FastAPI is unreachable through the Vite proxy (HTTP ${response.status}). ${BACKEND_STARTUP_GUIDANCE}`);
+      }
+      return new Error(`${action} (HTTP ${response.status}): ${body.slice(0, 240)}`);
+    }
+  }
+  return new Error(`${action} (HTTP ${response.status})`);
+}
+
+function requestError(error: unknown, action: string): Error {
+  if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name)) {
+    return new Error(`${action} timed out. Check the backend/provider status and retry.`);
+  }
+  if (error instanceof TypeError) {
+    return new Error(`Could not reach the FastAPI backend. ${BACKEND_STARTUP_GUIDANCE}`);
+  }
+  return error instanceof Error ? error : new Error(action);
+}
 
 export const api = {
   // Lands API
@@ -31,9 +68,15 @@ export const api = {
       if (params.legal_status) query.append('legal_status', params.legal_status);
       if (params.search) query.append('search', params.search);
     }
-    const res = await fetch(`${API_BASE}/lands?${query.toString()}`);
-    if (!res.ok) throw new Error(`Failed to fetch lands: ${res.statusText}`);
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/lands?${query.toString()}`, {
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (!res.ok) throw await responseError(res, 'Failed to fetch land listings');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Land listing request');
+    }
   },
 
   async getLandById(id: string): Promise<LandListing> {
@@ -43,9 +86,13 @@ export const api = {
   },
 
   async getStats(): Promise<LandStats> {
-    const res = await fetch(`${API_BASE}/lands/stats`);
-    if (!res.ok) throw new Error(`Failed to fetch stats: ${res.statusText}`);
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/lands/stats`, { signal: AbortSignal.timeout(8_000) });
+      if (!res.ok) throw await responseError(res, 'Failed to fetch land statistics');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Land statistics request');
+    }
   },
 
   async compareLands(land_ids: string[]): Promise<LandListing[]> {
@@ -93,17 +140,92 @@ export const api = {
     return res.json();
   },
 
-  async transcribeAudio(audioBlob: Blob, language: string = 'indic-auto'): Promise<{ transcript: string; detected_language: string; ai_mode: string }> {
+  async investigate(
+    query: string,
+    conversationLanguage: ConversationLanguage,
+    selectedLandId?: string,
+    conversationHistory: { role: 'user' | 'assistant'; content: string }[] = [],
+    documentAnalyses: DocumentAnalysisResponse[] = []
+  ): Promise<CollaborativeInvestigation> {
+    try {
+      const res = await fetch(`${API_BASE}/investigate/collaborate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          conversation_language: conversationLanguage,
+          selected_land_id: selectedLandId || undefined,
+          conversation_history: conversationHistory,
+          document_analyses: documentAnalyses
+        }),
+        signal: AbortSignal.timeout(90_000)
+      });
+      if (!res.ok) throw await responseError(res, 'Investigation failed');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Investigation request');
+    }
+  },
+
+  async downloadInvestigationReport(
+    conversationHistory: { role: 'user' | 'assistant'; content: string }[],
+    selectedLandId: string | undefined,
+    documentAnalyses: DocumentAnalysisResponse[]
+  ): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/investigate/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_history: conversationHistory,
+          selected_land_id: selectedLandId,
+          document_analyses: documentAnalyses
+        }),
+        signal: AbortSignal.timeout(30_000)
+      });
+      if (!res.ok) throw await responseError(res, 'Report generation failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'BhoomiVaani_Land_Buying_Report.pdf';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1_000);
+    } catch (error) {
+      throw requestError(error, 'Report generation request');
+    }
+  },
+
+  async getModelsStatus(): Promise<ModelsHealth> {
+    try {
+      const res = await fetch(`${API_BASE}/investigate/models/status`, {
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (!res.ok) throw await responseError(res, 'Could not load AI provider status');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Provider status check');
+    }
+  },
+
+  async transcribeAudio(audioBlob: Blob): Promise<{ transcript: string; detected_language: string; ai_mode: string; is_live: boolean }> {
     const formData = new FormData();
     formData.append('file', audioBlob, 'recording.wav');
-    formData.append('language', language);
+    formData.append('language', 'auto');
 
-    const res = await fetch(`${API_BASE}/ai/transcribe`, {
-      method: 'POST',
-      body: formData
-    });
-    if (!res.ok) throw new Error(`Prisma STT error: ${res.statusText}`);
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/ai/transcribe`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(130_000)
+      });
+      if (!res.ok) throw await responseError(res, 'Prisma STT failed');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Prisma transcription request');
+    }
   },
 
   async speakText(text: string, language: Language = 'te'): Promise<{ audio_base64: string; duration_estimate_sec: number; ai_mode: string }> {
@@ -157,8 +279,12 @@ export const api = {
 
   // Health
   async getHealth(): Promise<any> {
-    const res = await fetch(`${API_BASE}/health`);
-    if (!res.ok) throw new Error('Backend health check failed');
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(8_000) });
+      if (!res.ok) throw await responseError(res, 'Backend health check failed');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Backend health request');
+    }
   }
 };

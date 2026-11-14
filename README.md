@@ -1,260 +1,108 @@
-# BhoomiVaani (భూమివాణి)
-### AI-Powered Voice-First Land Intelligence & Legal Awareness Platform
+# BhoomiVaani
 
-> **DEMONSTRATION PROTOTYPE NOTICE:**  
-> BhoomiVaani utilizes entirely synthetic land records and simulated revenue extracts for educational and awareness purposes. Never execute binding financial transactions or property purchases without independent verification from a qualified civil property advocate and local land revenue authorities.
+BhoomiVaani is a voice-first land-buying advisor. Its main experience is a single-column conversation with Bhoomi, an animated 3D advisor whose listening, thinking, and speaking states follow the voice pipeline. Users can speak or type; spoken language is identified by Prisma and the reply uses that language. The conversation presents Bhoomi's response rather than a multi-character dashboard.
 
----
+Users can also upload a PDF or text document from the conversation. Bhoomi receives the resulting rule-based text-scan findings as user-provided context, and the conversation can be downloaded as a structured PDF report covering buyer requirements, seller claims, document scan results, checks still required, risks, and next steps. The report uses standard PDF fonts; local-script text that cannot be rendered is marked for review in the original conversation. Document scans and the report do not authenticate documents or replace official/legal verification.
 
-## 1. Project Overview
+## Important: demonstration records
 
-**BhoomiVaani** helps Indian land buyers—especially first-time agricultural land buyers, rural farmers, and urban investors—understand land listings, detect legal title risks (such as unreleased bank mortgages and disputed ancestral inheritance), verify speculative broker infrastructure claims, and explore opportunities using natural voice conversations in **Telugu (తెలుగు)**, **Hindi (हिन्दी)**, and **Indian English**.
+The six listings in `backend/data/lands.json`, their survey numbers, coordinates, prices, legal-risk examples, and infrastructure references are synthetic demonstration data. They are not government records and have not been independently checked. A listing with no risk entries is **not** a clear-title finding. Document scanning is a text-pattern aid, not legal analysis or title certification. Growth charts are formula-based examples, not market forecasts. If a question does not uniquely identify a parcel, the investigation returns general awareness instead of silently assigning a listing. Obtain authoritative records and independent legal advice before making a purchase.
 
-The platform tackles information asymmetry in the Indian real estate market, reducing vulnerability to misleading broker statements through transparent, evidence-based data.
+## Stack
 
----
+- **Frontend:** React 18, TypeScript 5, Vite 5, Three.js 0.187
+- **Backend:** FastAPI, Pydantic, Uvicorn, httpx
+- **Speech (optional):** Gnani Prisma v3.0 STT and Timbre v2.5 TTS
+- **Reasoning:** Qwen3 through Ollama's native chat API, or an explicitly labeled synthetic demo adapter
 
-## 2. Technology Stack
+Gnani publishes Evon model weights, but this project does not configure a hosted Evon API: no supported hosted API contract was found in the official documentation. The repository previously sent requests to an undocumented URL and labeled deterministic responses as Evon. Do not configure that endpoint or label the returned model as Evon. A local Evon deployment is possible separately, but has not been integrated or tested here.
 
-- **Frontend:**
-  - **Framework:** React 18, Vite 5, TypeScript 5
-  - **Styling:** Tailwind CSS (Fintech forest-green, warm ivory, and gold palette)
-  - **Icons:** Lucide React
-  - **Analytics:** Recharts (3-year & 5-year illustrative growth projections)
-- **Backend:**
-  - **Framework:** Python 3.12, FastAPI, Pydantic v2, Uvicorn
-  - **PDF Intelligence & Extraction:** `pypdf` (safe text extraction), `reportlab` (dynamic PDF dossier generation)
-  - **HTTP & Networking:** `httpx` with timeout management and graceful connection fallbacks
-- **AI Integration Pipeline:**
-  - **STT (Speech-to-Text):** Gnani Prisma v2.5 (`https://api.vachana.ai/stt/v3`)
-  - **Reasoning Engine:** Gnani Evon v3.3 30B (`gnani-evon-v3.3-30b-a3b` / Artha Sovereign AI stack)
-  - **TTS (Text-to-Speech):** Gnani Timbre v2.5 (`https://api.vachana.ai/api/v1/tts/inference`)
-  - **Simulation Mode:** Deterministic, offline `MOCK_MODE` with realistic Indic speech parsing and audio chime synthesis when credentials are not supplied.
+## Requirements
 
----
+- Python 3.10+
+- Node.js 18+
 
-## 3. Mandatory AI Pipeline
+## Install and start
 
-```
-USER MICROPHONE
-       │
-       ▼
-PRISMA v2.5 (Speech-to-Text)
-       │
-       ▼
-TRANSCRIBED USER QUERY (Telugu / Hindi / English)
-       │
-       ▼
-EVON v3.3 30B (Reasoning Engine)
-       │
-       ▼
-STRUCTURED REASONING PAYLOAD
-       ├────── Matched Land IDs (Selected strictly from database)
-       ├────── Legal Risk Analysis (Mortgages, liens, civil suits)
-       ├────── Infrastructure Claim Analysis (Officially announced vs Unverified)
-       └────── Natural Language Explanation (Conversational Indic response)
-       │
-       ▼
-TIMBRE v2.5 (Text-to-Speech)
-       │
-       ▼
-AUDIO PLAYBACK (Audio Response in Browser)
-```
-
----
-
-## 4. Synthetic Land Database (`backend/data/lands.json`)
-
-The platform contains exactly **6 realistic, fictional property holdings** around Hyderabad and Telangana:
-
-| Land ID | Title | Location | District | Extent | Total Price | Legal Status | Key Infrastructure |
-|---|---|---|---|---|---|---|---|
-| **bv-hyd-01** | Sri Venkateshwara Farm Groves | Chevella | Ranga Reddy | 10.0 Acres | ₹420 Lakhs | **Clean Title Verified** | RRR Southern Arc (4.5 km) - Officially announced |
-| **bv-hyd-02** | Ananthagiri Eco Terraces | Vikarabad Hills | Vikarabad | 5.5 Acres | ₹154 Lakhs | **Clean Title Verified** | Eco-Tourism Circuit (6 km) - Proposed |
-| **bv-hyd-03** | Pragati Highway Agri-Vistas | Shadnagar | Ranga Reddy | 12.0 Acres | ₹660 Lakhs | **Clean Title Verified** | NH-44 6-Lane Expansion (2.1 km) - Operational |
-| **bv-hyd-04** | Keesara Sunrise Meadows (Plot 4) | Keesara Gutta | Medchal-Malkajgiri | 6.0 Acres | ₹216 Lakhs | **Disputed / Active Encumbrance** | ₹85L Bank Lien + Pending Civil Suit OS 412/2022 |
-| **bv-hyd-05** | Yadadri Divine Orchard | Bhuvanagiri | Yadadri | 8.0 Acres | ₹256 Lakhs | **Clean Title Verified** | Warangal Smart Highway (3.2 km) - Under construction |
-| **bv-hyd-06** | Medak Heritage Farmlands | Narsapur | Medak | 10.0 Acres | ₹350 Lakhs | **Clean Title Verified** | RRR Northern Arc (2.8 km) - Officially announced |
-
----
-
-## 5. Key Implemented Features
-
-### Feature A: Voice-First Land Search
-- Natural voice interaction with animated audio visualizer.
-- Speech transcribed via **Prisma v2.5**, interpreted via **Evon v3.3 30B**, and spoken back via **Timbre v2.5**.
-- Matching property cards are dynamically highlighted in the dashboard with animated golden-green borders.
-- Clickable demo prompts included:
-  1. *"Show me 10-acre clean agricultural land near Hyderabad."*
-  2. *"Is Plot 4 safe to buy?"*
-  3. *"Check whether the upcoming highway claim is verified."*
-
-### Feature B: Broker Claim Checker
-- Dedicated verification page (`/claims`).
-- Evaluates real estate broker claims (e.g. *"A metro station will be built just 2 km from this land next year"*).
-- Compares against statutory infrastructure evidence and classifies claims into:
-  - `VERIFIED`
-  - `PROPOSED`
-  - `UNVERIFIED`
-  - `CONTRADICTED`
-- Discloses confidence score, documentary basis, and missing government notifications.
-
-### Feature C: Legal Document Analyzer
-- Upload PDF or text property documents (`/documents`).
-- Extracts text safely and scans for critical red flags:
-  - Undischarged mortgages & bank hypothecation
-  - Active civil litigation (OS No. suits under Doctrine of Lis Pendens)
-  - Missing co-parcener or legal heir signatures
-  - Cadastral survey acreage variances
-- Includes built-in **1-Click Synthetic Sample Deeds** (`sample_clean_patta_deed.txt` and `sample_disputed_mortgage_deed.txt`).
-- Generates tailored questions to ask a licensed property advocate.
-
-### Feature D: Land Growth Insights
-- Interactive **Recharts** projection analytics (`/growth`).
-- Toggle between **3-Year** and **5-Year** illustrative scenarios.
-- Factors in infrastructure catalysts versus encumbrance drag.
-- Displays statutory disclaimer distinguishing projections from guaranteed returns.
-
-### Feature E: Side-by-Side Property Comparison
-- Compare 2 to 3 properties side-by-side (`/compare`).
-- Compares rate per acre, total valuation, legal encumbrance status, infrastructure evidence, and AI growth score.
-
-### Feature F: Downloadable Land Report Dossier
-- Generates authentic, print-ready PDF reports (`/api/lands/{land_id}/report`).
-- Built with **ReportLab**, featuring valuation tables, legal risk badges, infrastructure checklists, and statutory buyer precautions.
-- Prominently watermarked: `"DEMONSTRATION REPORT - SYNTHETIC DATA - NOT AN OFFICIAL LAND CERTIFICATE"`.
-
----
-
-## 6. REST API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/health` | Health check, Gnani AI stack status, and database stats |
-| `GET` | `/api/lands` | Get all lands with optional filters (district, acres, budget, type) |
-| `GET` | `/api/lands/{land_id}` | Retrieve individual property dossier |
-| `POST` | `/api/lands/compare` | Compare multiple properties side-by-side |
-| `GET` | `/api/lands/{land_id}/report` | Download print-ready PDF dossier |
-| `POST` | `/api/ai/chat` | Evon v3.3 30B reasoning chat endpoint |
-| `POST` | `/api/ai/transcribe` | Prisma v2.5 Speech-to-Text audio transcription |
-| `POST` | `/api/ai/speak` | Timbre v2.5 Text-to-Speech audio synthesis |
-| `POST` | `/api/claims/check` | Broker statement evidence evaluation |
-| `POST` | `/api/documents/analyze` | Safe legal deed PDF/TXT analysis |
-| `GET` | `/api/documents/samples` | List built-in synthetic sample documents |
-| `GET` | `/api/documents/samples/{id}` | Fetch content and pre-run analysis for a sample |
-
----
-
-## 7. Running the Project
-
-### Prerequisites
-- Python 3.10+ (tested on Python 3.12.10)
-- Node.js 18+ (tested on Node.js v24.17.0)
-
-### Quick Start (Single Command)
+From the repository root:
 
 ```bash
-# Clone or navigate to the repository
-cd bhoomivaani
-
-# Launch both Backend (port 8000) and Frontend (port 5173) concurrently
+cp .env.example .env
+python -m pip install -r backend/requirements.txt
+cd frontend && npm ci && cd ..
 python start.py
 ```
 
-*Alternatively on Windows:*
-```cmd
-run.bat
-```
+Or use `./run.sh` on Linux/macOS, or `run.bat` on Windows. The frontend is at `http://localhost:5173`, the API at `http://127.0.0.1:8000`, and OpenAPI docs at `http://127.0.0.1:8000/docs`.
 
-*Alternatively on Linux / GitHub Codespaces:*
+The app needs both processes. Running only `cd frontend && npm run dev` starts the UI but does not start FastAPI; voice and reasoning requests will fail visibly. In Codespaces, `.devcontainer/devcontainer.json` forwards frontend port 5173 and backend port 8000. Vite proxies `/api` to `127.0.0.1:8000`; open the forwarded frontend URL, not the backend port. The API root `/` points users to the frontend, and `/health` is the backend health check (`/api/health` remains available).
+
+Run the services separately when needed:
+
 ```bash
-chmod +x run.sh
-./run.sh
-```
-
-### Manual Individual Commands
-
-**Backend:**
-```bash
-# Install backend dependencies
-python -m pip install -r backend/requirements.txt
-
-# Start FastAPI server
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --app-dir backend
+cd frontend && npm run dev
 ```
 
-**Frontend:**
-```bash
-cd frontend
-npm install
-npm run dev
-```
+## Configuration
 
-### Localhost URLs
-- **Frontend Dashboard:** [http://localhost:5173](http://localhost:5173)
-- **Backend API:** [http://127.0.0.1:8000](http://127.0.0.1:8000)
-- **Interactive Swagger Docs:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **API Health Check:** [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health)
+Copy `.env.example` to `.env`. Provider secrets are read only by the backend.
 
----
+### Synthetic demo mode (default)
 
-## 8. Configuration & Environment Variables
+`MOCK_MODE=true` does not call speech or model providers. Typed investigations use the deterministic synthetic-data adapter. Microphone and speech playback requests report that the provider is unavailable; they do not return a made-up transcript or audio.
 
-Copy `.env.example` to `.env`:
+### Optional Gnani speech services
+
+Get an API key from the [Gnani API dashboard](https://app.gnani.ai/voice), set `GNANI_API_KEY`, and set `MOCK_MODE=false`. The backend uses the documented `X-API-Key-ID` authentication header and endpoints:
+
+- Prisma v3.0: `POST https://api.vachana.ai/stt/v3`, multipart audio and `indic-auto` language detection
+- Timbre v2.5: `POST https://api.vachana.ai/api/v1/tts/inference`, binary WAV response
+
+The browser records microphone audio, decodes it to mono PCM WAV, and uploads it to Prisma with automatic language identification. The returned transcript is shown in the conversation and sent to Qwen with the recent turns and extracted buyer facts; Qwen generates one Bhoomi reply, which Timbre returns as WAV. The browser attempts to play the full WAV and offers a manual “Hear Bhoomi” retry when autoplay is blocked. Typed questions use their writing script to choose a supported language. Language-specific voice choices come from Gnani's v2.5 voice catalog. Provider failures are reported; they are not replaced with simulated speech. Browser recordings stop at 25 seconds, below Prisma REST's 30-second limit.
+The status endpoint reports `CONFIGURED_UNVERIFIED` until a real transcription or synthesis request succeeds; only then does it report `CONNECTED`. The API key alone does not establish connectivity. Missing credentials are reported as `GNANI_API_KEY` requirements.
+Prisma uses `PRISMA_REQUEST_TIMEOUT_SECONDS` (120 seconds by default); its browser request allows 130 seconds so the frontend does not abort before the backend reports an upstream timeout.
+
+### Qwen3 through Ollama
+
+Install and run Ollama separately, fetch a Qwen3 model, then set:
 
 ```ini
-GNANI_API_KEY=
-PRISMA_API_URL=https://api.vachana.ai/stt/v3
-EVON_API_URL=https://api.vachana.ai/v1/chat/completions
-TIMBRE_API_URL=https://api.vachana.ai/api/v1/tts/inference
-MOCK_MODE=true
-DEFAULT_LANGUAGE=te
-BACKEND_HOST=0.0.0.0
-BACKEND_PORT=8000
-FRONTEND_PORT=5173
+MOCK_MODE=false
+REASONING_PROVIDER=QWEN3_OLLAMA
+OLLAMA_API_URL=http://localhost:11434/api/chat
+OLLAMA_MODEL=qwen3:0.6b
 ```
 
-- When `MOCK_MODE=true` (or when `GNANI_API_KEY` is empty), the entire platform operates offline in simulation mode with realistic STT, LLM reasoning, and TTS audio synthesis without requiring third-party credentials.
-- When `GNANI_API_KEY` is provided, live requests authenticate via the `X-API-Key-ID` header.
+The service checks for the configured model and parses its actual JSON response. Provider errors or malformed responses fail visibly; they do not silently switch to demo reasoning. Configure Gnani credentials too if voice transcription and spoken responses are wanted. Language selection reflects the configured reasoning/STT/TTS capabilities; text-only provider use does not imply speech is available.
 
----
+## API
 
-## 9. Automated Testing Results
+Existing API paths are retained. The main experience uses:
 
-The backend contains a full automated **pytest** test suite in `backend/tests/test_api.py`.
+- `GET /api/lands`, `GET /api/lands/{land_id}`, `GET /api/lands/stats`
+- `POST /api/investigate/collaborate` — the existing investigation response, with optional bounded conversation history; the UI presents the final Bhoomi response
+- `POST /api/investigate/report` — generates a PDF from the buyer conversation, supplied document-scan results, and an explicitly selected demonstration parcel
+- `GET /api/investigate/models/status` — provider names, mock/live status, and language availability
+- `POST /api/ai/transcribe`, `POST /api/ai/speak`
+- `POST /api/claims/check`, `POST /api/documents/analyze`
+- `POST /api/lands/compare`, `GET /api/lands/{land_id}/report`
 
-Run tests:
+The investigation response includes an evidence ledger and distinguishes synthetic listing data from missing or unverified authoritative records. The UI and PDF reports are preliminary awareness tools, not legal advice or government verification.
+
+## Tests and build
+
 ```bash
-python -m pytest backend/tests/test_api.py -v
+PYTHONPATH=backend python -m pytest backend/tests -q
+cd frontend && npm run build
 ```
 
-**Test Execution Summary:**
-```
-backend/tests/test_api.py::test_health_check PASSED                      [  6%]
-backend/tests/test_api.py::test_get_all_lands PASSED                     [ 13%]
-backend/tests/test_api.py::test_filter_lands PASSED                      [ 20%]
-backend/tests/test_api.py::test_disputed_property_details PASSED         [ 26%]
-backend/tests/test_api.py::test_compare_lands PASSED                     [ 33%]
-backend/tests/test_api.py::test_pdf_report_generation PASSED             [ 40%]
-backend/tests/test_api.py::test_ai_chat_prompt_1_clean_10_acre PASSED    [ 46%]
-backend/tests/test_api.py::test_ai_chat_prompt_2_plot_4_safety PASSED    [ 53%]
-backend/tests/test_api.py::test_ai_chat_prompt_3_highway_claim PASSED    [ 60%]
-backend/tests/test_api.py::test_broker_claim_checker_metro PASSED        [ 66%]
-backend/tests/test_api.py::test_broker_claim_checker_guarantee PASSED    [ 73%]
-backend/tests/test_api.py::test_document_analysis_clean PASSED           [ 80%]
-backend/tests/test_api.py::test_document_analysis_disputed PASSED        [ 86%]
-backend/tests/test_api.py::test_text_to_speech PASSED                    [ 93%]
-backend/tests/test_api.py::test_speech_to_text PASSED                    [100%]
+The frontend uses the existing locked Three.js dependency; no additional 3D renderer is required.
 
-======================= 15 passed in 14.62s ========================
-```
+## Verified provider documentation
 
----
-
-## 10. Security & Ethical Safeguards
-
-1. **API Key Isolation:** API credentials reside strictly in backend environment variables and are never bundled into client JavaScript.
-2. **Safe PDF & Text Extraction:** Files are treated strictly as passive text data; prompt injection instructions embedded inside uploaded documents are ignored.
-3. **Upload Constraints:** File uploads are capped at 10 MB and restricted to `.pdf` and `.txt`.
-4. **Deterministic Land Grounding:** The Evon reasoning engine is constrained to select only valid IDs from `lands.json`. It cannot invent properties or fictitious survey numbers.
-5. **No False Government Verification:** Every report and UI screen bears a clear disclaimer stating that mock records do not represent official revenue or Sub-Registrar certifications.
+- [Gnani speech API authentication and products](https://docs.gnani.ai/api/introduction/introduction)
+- [Prisma REST transcription request](https://docs.gnani.ai/api/STT/speech-to-text)
+- [Timbre v2.5 REST request and audio response](https://docs.gnani.ai/api/TTS/tts-inference)
+- [Timbre v2.5 voice catalog](https://docs.gnani.ai/api/TTS/available-voices)
+- [Gnani Evon v3.3 model card](https://huggingface.co/gnani/gnani-evon-v3.3-30B-A3B)

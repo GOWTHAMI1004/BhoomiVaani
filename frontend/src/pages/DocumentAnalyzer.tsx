@@ -57,8 +57,8 @@ export const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ language }) 
       const res = await api.getSampleDocumentContent(sampleId);
       setAnalysisResult(res.analysis);
       setFile(null);
-    } catch (err: any) {
-      setErrorMsg('Failed to analyze sample document.');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to load the sample document.');
     } finally {
       setLoadingSample(false);
     }
@@ -73,7 +73,7 @@ export const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ language }) 
       case 'MODERATE':
         return 'text-amber-700 bg-amber-50 border-amber-300';
       default:
-        return 'text-emerald-700 bg-emerald-50 border-emerald-300';
+        return 'text-amber-700 bg-amber-50 border-amber-300';
     }
   };
 
@@ -87,10 +87,10 @@ export const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ language }) 
           </div>
           <div>
             <h1 className="text-2xl font-black text-forest-950 font-serif">
-              Legal Title & Deed Document Analyzer
+              Document Text Pattern Scanner
             </h1>
             <p className="text-xs text-gray-500">
-              Upload draft sale agreements, Dharani passbooks, or registered deed extracts to spot hidden mortgages, court litigation, and missing signatures.
+              Scan uploaded text for selected keywords. This cannot verify authenticity, legal status, ownership, or whether a flagged item is current.
             </p>
           </div>
         </div>
@@ -135,8 +135,8 @@ export const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ language }) 
             <div className="mt-4 p-4 rounded-2xl bg-forest-50 border border-forest-200 flex items-center gap-3 text-xs text-forest-950">
               <Sparkles className="w-5 h-5 text-gold animate-spin" />
               <div>
-                <div className="font-bold">Analyzing legal clauses with Evon 30B...</div>
-                <div className="text-gray-500">Extracting survey records, checking encumbrance clauses and succession history.</div>
+                <div className="font-bold">Scanning the text you provided...</div>
+                <div className="text-gray-500">This rule-based scan does not query government records or verify document authenticity.</div>
               </div>
             </div>
           )}
@@ -171,7 +171,7 @@ export const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ language }) 
                 <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded font-mono ${
                   s.type.includes('Disputed') ? 'bg-rose-600 text-white' : 'bg-emerald-700 text-white'
                 }`}>
-                  {s.type.includes('Disputed') ? 'DISPUTED SAMPLE' : 'CLEAN SAMPLE'}
+                  {s.type.includes('Disputed') ? 'DEMO WITH FLAGS' : 'SYNTHETIC SAMPLE'}
                 </span>
               </button>
             ))}
@@ -190,7 +190,7 @@ export const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ language }) 
               </span>
               <div className="flex items-center gap-3 mt-1.5">
                 <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getRiskColor(analysisResult.risk_level)}`}>
-                  Overall Legal Risk: {analysisResult.risk_level}
+                  Text Pattern Indicator: {analysisResult.risk_level}
                 </span>
                 {analysisResult.survey_numbers_found.length > 0 && (
                   <span className="text-xs bg-gray-100 text-gray-700 px-2.5 py-1 rounded-md font-mono">
@@ -202,7 +202,7 @@ export const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ language }) 
 
             <div className="flex items-center gap-3 sm:text-right">
               <div>
-                <div className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">Risk Assessment Score</div>
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">Rule-Based Pattern Score</div>
                 <div className="text-3xl font-black font-serif text-forest-950">
                   {analysisResult.overall_risk_score} <span className="text-xs font-sans text-gray-400 font-normal">/ 100</span>
                 </div>
@@ -218,7 +218,7 @@ export const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ language }) 
           {/* Detected Legal Issues List */}
           <div className="space-y-4">
             <h3 className="text-xs uppercase tracking-wider font-bold text-gray-500 flex items-center gap-1.5">
-              <span>Detected Clauses & Title Impediments ({analysisResult.detected_issues.length})</span>
+              <span>Text Patterns to Review ({analysisResult.detected_issues.length})</span>
             </h3>
 
             {analysisResult.detected_issues.map((issue, idx) => (

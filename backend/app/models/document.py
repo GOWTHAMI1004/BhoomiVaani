@@ -11,14 +11,16 @@ class DetectedIssue(BaseModel):
 class DocumentAnalysisResponse(BaseModel):
     filename: str
     total_characters: int
-    overall_risk_score: int # 0 (Safe) to 100 (Extremely Risky)
-    risk_level: str # 'LOW', 'MODERATE', 'HIGH', 'CRITICAL'
+    overall_risk_score: int # Rule-based text-pattern score, not a property risk rating.
+    risk_level: str # Pattern indicator: 'LOW', 'MODERATE', 'HIGH', or 'CRITICAL'.
     detected_issues: List[DetectedIssue] = Field(default_factory=list)
     summary: str
     survey_numbers_found: List[str] = Field(default_factory=list)
     encumbrance_clauses_found: bool = False
     disclaimer: str = (
-        "PRELIMINARY DOCUMENT AWARENESS TOOL ONLY - NOT LEGAL ADVICE OR TITLE CERTIFICATION. "
-        "Consult a qualified property advocate and verify original records with the Sub-Registrar and revenue authorities."
+        "RULE-BASED TEXT SCAN ONLY - NOT LEGAL ADVICE OR TITLE CERTIFICATION. "
+        "Extracted statements are user-provided and have not been independently verified. "
+        "Consult a qualified property advocate and verify original records with the relevant authorities."
     )
-    ai_mode: str = "MOCK AI"
+    evidence_type: str = "USER_PROVIDED_DOCUMENT_TEXT"
+    ai_mode: str = "RULE_BASED_DOCUMENT_SCAN"

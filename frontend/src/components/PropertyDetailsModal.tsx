@@ -2,7 +2,6 @@ import React from 'react';
 import { 
   X, 
   MapPin, 
-  ShieldCheck, 
   AlertTriangle, 
   FileDown, 
   Milestone, 
@@ -35,7 +34,7 @@ export const PropertyDetailsModal: React.FC<PropertyDetailsModalProps> = ({
 
   if (!land) return null;
 
-  const isClean = land.legal_status.toLowerCase().includes('clean');
+  const hasListedRisks = land.legal_risks.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -117,18 +116,18 @@ export const PropertyDetailsModal: React.FC<PropertyDetailsModalProps> = ({
             </h3>
 
             <div className={`p-4 rounded-2xl border ${
-              isClean 
-                ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
-                : 'bg-rose-50 border-rose-200 text-rose-950'
+              hasListedRisks
+                ? 'bg-rose-50 border-rose-200 text-rose-950'
+                : 'bg-amber-50 border-amber-200 text-amber-950'
             }`}>
               <div className="flex items-center gap-2 mb-2 font-bold text-sm">
-                {isClean ? <ShieldCheck className="w-5 h-5 text-emerald-600" /> : <AlertTriangle className="w-5 h-5 text-rose-600" />}
+                <AlertTriangle className={`w-5 h-5 ${hasListedRisks ? 'text-rose-600' : 'text-amber-600'}`} />
                 <span>{land.legal_status}</span>
               </div>
 
-              {isClean ? (
-                <p className="text-xs text-emerald-800 leading-relaxed">
-                  Our synthetic Dharani records reflect 30 years of continuous clear ownership, non-prohibited Section 22-A status, and zero registered mortgages or civil court attachments.
+              {!hasListedRisks ? (
+                <p className="text-xs text-amber-900 leading-relaxed">
+                  No risk entries are listed in this synthetic example. This is not a title search or evidence that the property is free of encumbrances.
                 </p>
               ) : (
                 <div className="space-y-3 mt-3">
@@ -155,7 +154,7 @@ export const PropertyDetailsModal: React.FC<PropertyDetailsModalProps> = ({
           <div>
             <h3 className="text-xs uppercase tracking-wider font-bold text-gray-500 mb-2 flex items-center gap-1.5">
               <Milestone className="w-4 h-4 text-forest-800" />
-              <span>Infrastructure Claims & Verification Evidence</span>
+              <span>Infrastructure Demo Entries · Not Independently Verified</span>
             </h3>
 
             <div className="overflow-x-auto border border-gray-200 rounded-xl">
@@ -165,7 +164,7 @@ export const PropertyDetailsModal: React.FC<PropertyDetailsModalProps> = ({
                     <th className="p-3 font-semibold">Claimed Project</th>
                     <th className="p-3 font-semibold">Status</th>
                     <th className="p-3 font-semibold">Distance</th>
-                    <th className="p-3 font-semibold">Source / Evidentiary Basis</th>
+                    <th className="p-3 font-semibold">Synthetic Source / Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -180,7 +179,7 @@ export const PropertyDetailsModal: React.FC<PropertyDetailsModalProps> = ({
                             ? 'bg-amber-100 text-amber-800'
                             : 'bg-rose-100 text-rose-800'
                         }`}>
-                          {ev.status}
+                          Demo: {ev.status}
                         </span>
                       </td>
                       <td className="p-3 text-gray-600">{ev.distance_km} km</td>

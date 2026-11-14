@@ -22,7 +22,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all origins for seamless development and codespaces
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,6 +35,16 @@ app.include_router(routes_claims.router)
 app.include_router(routes_documents.router)
 app.include_router(routes_investigate.router)
 
+@app.get("/")
+def root():
+    return {
+        "service": "BhoomiVaani API",
+        "message": "Open the BhoomiVaani frontend on port 5173.",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+@app.get("/health")
 @app.get("/api/health")
 def health_check():
     stats = land_service.get_stats()
@@ -46,11 +56,19 @@ def health_check():
         "default_language": settings.default_language,
         "gnani_models": {
             "stt": "Gnani Prisma v2.5",
-            "reasoning": "Gnani Evon v3.3 30B (gnani-evon-v3.3-30b-a3b)",
+            "reasoning": (
+                "Synthetic demonstration rules"
+                if settings.mock_mode
+                else f"{settings.ollama_model} via Ollama"
+                if settings.reasoning_provider == "QWEN3_OLLAMA"
+                else "No supported reasoning provider configured"
+            ),
             "tts": "Gnani Timbre v2.5"
         },
         "database": {
             "total_properties": stats.get("total_properties", 0),
+            "records_without_listed_risks": stats.get("records_without_listed_risks", 0),
+            # Retained for older clients; it does not mean clean title or verified documents.
             "clean_properties": stats.get("clean_document_examples", 0),
             "risk_flagged_properties": stats.get("risk_flagged_properties", 0)
         }
@@ -61,7 +79,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.exception(f"Unhandled exception at {request.url.path}: {str(exc)}")
     return JSONResponse(
         status_code=500,
-        content={"detail": "An internal server error occurred.", "error": str(exc)}
+        content={"detail": "An internal server error occurred."}
     )
 
 if __name__ == "__main__":
