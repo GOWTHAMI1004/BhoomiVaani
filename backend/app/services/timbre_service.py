@@ -4,11 +4,13 @@ import io
 import struct
 import time
 import wave
+import hashlib
 import httpx
 from typing import Tuple, Dict, Optional
 from app.config import settings
 from app.models.ai import ModelStatusItem
 from app.services.ai_errors import ProviderRequestError, ProviderUnavailableError
+from app.services.voice_reference_service import voice_reference_service
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +89,7 @@ class TimbreService:
                 if (
                     wav.getnchannels() != 1
                     or wav.getsampwidth() != 2
-                    or wav.getframerate() != 24000
+                    or wav.getframerate() not in {8000, 16000, 22050, 24000, 44100, 48000}
                     or wav.getnframes() == 0
                 ):
                     raise ProviderRequestError(
@@ -119,7 +121,6 @@ class TimbreService:
             raise ProviderRequestError(
                 f"Gnani Timbre v2.5 does not support language '{language}'."
             )
-        voice_id = voice or language_voices.get(character.lower(), language_voices["bhoomi"])
         if self.mock_mode:
             raise ProviderUnavailableError(
                 "Speech synthesis is disabled in mock mode. Configure Gnani credentials and set MOCK_MODE=false."
@@ -131,7 +132,15 @@ class TimbreService:
         if len(text) > 600:
             raise ProviderRequestError("Speech text exceeds the 600-character limit.")
 
-        cache_key = f"{character}:{normalized_language}:{voice_id}:{speed}:{text}"
+        is_bhoomi = character.lower() == "bhoomi"
+        speaker_embedding = voice_reference_service.load_embedding() if is_bhoomi else None
+        if is_bhoomi and speaker_embedding is None:
+            raise ProviderUnavailableError(
+                "Bhoomi's Flow voice reference has not been verified and configured; no preset voice will be substituted."
+            )
+        voice_id = "Bhoomi cloned voice" if is_bhoomi else (voice or language_voices.get(character.lower(), language_voices["bhoomi"]))
+        embedding_fingerprint = hashlib.sha256(speaker_embedding["embedding"].encode()).hexdigest() if speaker_embedding else ""
+        cache_key = f"{character}:{normalized_language}:{voice_id}:{speed}:{embedding_fingerprint}:{text}"
         if cache_key in self._audio_cache:
             b64, dur = self._audio_cache[cache_key]
             return b64, "GNANI_TIMBRE_V2.5 (CACHED)", dur, voice_id, True
@@ -158,20 +167,29 @@ class TimbreService:
         if gnani_lang is None:
             raise ProviderRequestError(f"Unsupported Gnani Timbre language '{language}'.")
 
-        payload = {
-            "text": text,
-            "voice": voice_id,
-            "model": "timbre-v2.5",
-            "language": gnani_lang,
-            "speed": speed,
-            "audio_config": {
-                "sample_rate": 24000,
-                "num_channels": 1,
-                "sample_width": 2,
-                "encoding": "linear_pcm",
-                "container": "wav",
-            },
+        audio_config = {
+            "sample_rate": 44100 if is_bhoomi else 48000,
+            "num_channels": 1,
+            "sample_width": 2,
+            "encoding": "linear_pcm",
+            "container": "wav",
         }
+        if is_bhoomi:
+            payload = {
+                "text": text,
+                "model": "vachana-vc-v1",
+                "speaker_embedding": speaker_embedding,
+                "audio_config": audio_config,
+            }
+        else:
+            payload = {
+                "text": text,
+                "voice": voice_id,
+                "model": "timbre-v2.5",
+                "language": gnani_lang,
+                "speed": speed,
+                "audio_config": audio_config,
+            }
 
         try:
             async with httpx.AsyncClient(timeout=settings.api_timeout_seconds) as client:
@@ -203,7 +221,7 @@ class TimbreService:
 
                     self._audio_cache[cache_key] = (b64, dur)
                     self.last_ping_status = "REQUEST_SUCCEEDED"
-                    return b64, "GNANI_TIMBRE_V2.5", dur, voice_id, True
+                    return b64, "GNANI_TIMBRE_VOICE_CLONE" if is_bhoomi else "GNANI_TIMBRE_V2.5", dur, voice_id, True
                 else:
                     self.last_ping_status = f"ERROR_{response.status_code}"
                     logger.error("Gnani Timbre request failed with status %s", response.status_code)

@@ -43,7 +43,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               BhoomiVaani System & AI Configuration
             </h1>
             <p className="text-xs text-gray-500">
-              Manage Gnani AI foundation models, language preferences, and simulation mode.
+              Manage speech services, external reasoning configuration, and language preferences.
             </p>
           </div>
         </div>
@@ -53,7 +53,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             ? 'bg-amber-100 text-amber-900 border-amber-300' 
             : 'bg-emerald-100 text-emerald-900 border-emerald-300'
         }`}>
-          {mockMode ? 'SYNTHETIC DEMO MODE' : 'PROVIDERS CONFIGURED PER BACKEND'}
+          {mockMode ? 'MOCK MODE — LIVE PROVIDERS DISABLED' : 'PROVIDER STATUS FROM BACKEND'}
         </span>
       </div>
 
@@ -68,28 +68,28 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           {/* Prisma v2.5 STT */}
           <div className="p-4 rounded-2xl bg-ivory-dark/40 border border-ivory-border space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-gray-800 text-sm">Prisma v2.5</span>
+              <span className="font-bold text-gray-800 text-sm">Prisma v3.0</span>
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-forest-100 text-forest-900 font-bold">STT</span>
             </div>
             <p className="text-gray-600 leading-relaxed">
-              Short-recording transcription through Gnani Prisma v2.5 when credentials are configured. Mock mode does not generate transcripts.
+              Short microphone recordings are transcribed by Gnani Prisma v3.0. The backend reads the key from GNANI_API_KEY and does not fabricate transcripts.
             </p>
             <div className="text-[11px] font-mono text-gray-500 pt-1">
               Endpoint: <span className="text-forest-900">https://api.vachana.ai/stt/v3</span>
             </div>
           </div>
 
-          {/* Evon v3.3 30B LLM */}
+          {/* External reasoning provider */}
           <div className="p-4 rounded-2xl bg-ivory-dark/40 border border-ivory-border space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-gray-800 text-sm">Evon v3.3 30B</span>
+              <span className="font-bold text-gray-800 text-sm">External reasoning model</span>
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-gold/20 text-gold-dark font-bold">REASONING</span>
             </div>
             <p className="text-gray-600 leading-relaxed">
-              No hosted Evon API is configured. The app can call the actual configured Qwen3 model through Ollama; otherwise it uses a clearly labeled synthetic demo adapter.
+              No provider has been selected yet. Reasoning requests show a clear error until an external LLM and its API contract are provided; no mock answer is returned.
             </p>
             <div className="text-[11px] font-mono text-gray-500 pt-1">
-              Model: <span className="text-forest-900">Qwen3/Ollama or synthetic demo rules</span>
+              Configure after provider selection using the REASONING_* environment variables.
             </div>
           </div>
 

@@ -56,13 +56,7 @@ def health_check():
         "default_language": settings.default_language,
         "gnani_models": {
             "stt": "Gnani Prisma v2.5",
-            "reasoning": (
-                "Synthetic demonstration rules"
-                if settings.mock_mode
-                else f"{settings.ollama_model} via Ollama"
-                if settings.reasoning_provider == "QWEN3_OLLAMA"
-                else "No supported reasoning provider configured"
-            ),
+            "reasoning": settings.reasoning_provider or "External LLM not selected",
             "tts": "Gnani Timbre v2.5"
         },
         "database": {

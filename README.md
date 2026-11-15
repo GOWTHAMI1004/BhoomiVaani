@@ -12,10 +12,10 @@ The six listings in `backend/data/lands.json`, their survey numbers, coordinates
 
 - **Frontend:** React 18, TypeScript 5, Vite 5, Three.js 0.187
 - **Backend:** FastAPI, Pydantic, Uvicorn, httpx
-- **Speech (optional):** Gnani Prisma v3.0 STT and Timbre v2.5 TTS
-- **Reasoning:** Qwen3 through Ollama's native chat API, or an explicitly labeled synthetic demo adapter
+- **Speech:** Gnani Prisma v3.0 STT and Timbre v2.5 TTS
+- **Reasoning:** External LLM provider adapter is intentionally pending provider selection
 
-Gnani publishes Evon model weights, but this project does not configure a hosted Evon API: no supported hosted API contract was found in the official documentation. The repository previously sent requests to an undocumented URL and labeled deterministic responses as Evon. Do not configure that endpoint or label the returned model as Evon. A local Evon deployment is possible separately, but has not been integrated or tested here.
+Gnani Evon is not used. BhoomiVaani does not assume a reasoning provider, endpoint, model, or request format. Until an external provider is selected and integrated, reasoning requests return a clear configuration error; no mock answer is returned.
 
 ## Requirements
 
@@ -48,9 +48,9 @@ cd frontend && npm run dev
 
 Copy `.env.example` to `.env`. Provider secrets are read only by the backend.
 
-### Synthetic demo mode (default)
+### Reasoning provider (pending selection)
 
-`MOCK_MODE=true` does not call speech or model providers. Typed investigations use the deterministic synthetic-data adapter. Microphone and speech playback requests report that the provider is unavailable; they do not return a made-up transcript or audio.
+The `.env.example` includes empty `REASONING_PROVIDER`, `REASONING_API_KEY`, `REASONING_API_BASE_URL`, and `REASONING_MODEL` values. These are provider-neutral configuration names only. Do not fill them until a provider and its documented API contract have been selected. Requests fail clearly while the provider adapter is pending.
 
 ### Optional Gnani speech services
 
@@ -59,22 +59,9 @@ Get an API key from the [Gnani API dashboard](https://app.gnani.ai/voice), set `
 - Prisma v3.0: `POST https://api.vachana.ai/stt/v3`, multipart audio and `indic-auto` language detection
 - Timbre v2.5: `POST https://api.vachana.ai/api/v1/tts/inference`, binary WAV response
 
-The browser records microphone audio, decodes it to mono PCM WAV, and uploads it to Prisma with automatic language identification. The returned transcript is shown in the conversation and sent to Qwen with the recent turns and extracted buyer facts; Qwen generates one Bhoomi reply, which Timbre returns as WAV. The browser attempts to play the full WAV and offers a manual “Hear Bhoomi” retry when autoplay is blocked. Typed questions use their writing script to choose a supported language. Language-specific voice choices come from Gnani's v2.5 voice catalog. Provider failures are reported; they are not replaced with simulated speech. Browser recordings stop at 25 seconds, below Prisma REST's 30-second limit.
+The browser records microphone audio, decodes it to mono PCM WAV, and uploads it to Prisma with automatic language identification. A successful transcript is shown and passed to the reasoning service. When a selected reasoning provider is integrated, its actual Bhoomi response is sent to Timbre and returned as WAV. The browser offers a manual playback control when autoplay is blocked. Typed questions use their writing script to choose a supported language. Language-specific voice choices come from Gnani's v2.5 voice catalog. Provider failures are reported; they are not replaced with simulated speech. Browser recordings stop at 25 seconds, below Prisma REST's 30-second limit.
 The status endpoint reports `CONFIGURED_UNVERIFIED` until a real transcription or synthesis request succeeds; only then does it report `CONNECTED`. The API key alone does not establish connectivity. Missing credentials are reported as `GNANI_API_KEY` requirements.
 Prisma uses `PRISMA_REQUEST_TIMEOUT_SECONDS` (120 seconds by default); its browser request allows 130 seconds so the frontend does not abort before the backend reports an upstream timeout.
-
-### Qwen3 through Ollama
-
-Install and run Ollama separately, fetch a Qwen3 model, then set:
-
-```ini
-MOCK_MODE=false
-REASONING_PROVIDER=QWEN3_OLLAMA
-OLLAMA_API_URL=http://localhost:11434/api/chat
-OLLAMA_MODEL=qwen3:0.6b
-```
-
-The service checks for the configured model and parses its actual JSON response. Provider errors or malformed responses fail visibly; they do not silently switch to demo reasoning. Configure Gnani credentials too if voice transcription and spoken responses are wanted. Language selection reflects the configured reasoning/STT/TTS capabilities; text-only provider use does not imply speech is available.
 
 ## API
 
@@ -105,4 +92,3 @@ The frontend uses the existing locked Three.js dependency; no additional 3D rend
 - [Prisma REST transcription request](https://docs.gnani.ai/api/STT/speech-to-text)
 - [Timbre v2.5 REST request and audio response](https://docs.gnani.ai/api/TTS/tts-inference)
 - [Timbre v2.5 voice catalog](https://docs.gnani.ai/api/TTS/available-voices)
-- [Gnani Evon v3.3 model card](https://huggingface.co/gnani/gnani-evon-v3.3-30B-A3B)

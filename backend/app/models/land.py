@@ -1,5 +1,33 @@
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from datetime import date
+from enum import Enum
+from typing import Dict, List, Optional
+from pydantic import BaseModel, Field, model_validator
+
+
+class ProvenanceClass(str, Enum):
+    USER_PROVIDED = "USER_PROVIDED"
+    BROKER_PROVIDED = "BROKER_PROVIDED"
+    EXTERNAL_SOURCE = "EXTERNAL_SOURCE"
+    OFFICIALLY_VERIFIED = "OFFICIALLY_VERIFIED"
+    AI_ESTIMATED = "AI_ESTIMATED"
+    SYNTHETIC_DEMONSTRATION = "SYNTHETIC_DEMONSTRATION"
+    UNKNOWN = "UNKNOWN"
+
+
+class DataProvenance(BaseModel):
+    classification: ProvenanceClass = ProvenanceClass.UNKNOWN
+    source_label: str = "Source not recorded"
+    source_url: Optional[str] = None
+    last_updated: Optional[date] = None
+    evidence_references: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def verified_records_require_evidence(self):
+        if self.classification == ProvenanceClass.OFFICIALLY_VERIFIED and not (
+            self.source_url or self.evidence_references
+        ):
+            raise ValueError("Officially verified data must include a source URL or evidence reference.")
+        return self
 
 class Coordinates(BaseModel):
     lat: float
@@ -36,6 +64,19 @@ class LandListing(BaseModel):
     image_url: str
     description: str
     coordinates: Coordinates
+    record_provenance: DataProvenance = Field(default_factory=DataProvenance)
+    field_provenance: Dict[str, DataProvenance] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def provide_provenance_for_each_field(self):
+        """Every value gets field provenance, inheriting the record source unless overridden."""
+        provenance = dict(self.field_provenance)
+        for field_name in type(self).model_fields:
+            if field_name in {"record_provenance", "field_provenance"}:
+                continue
+            provenance.setdefault(field_name, self.record_provenance.model_copy(deep=True))
+        self.field_provenance = provenance
+        return self
 
 class LandFilterParams(BaseModel):
     district: Optional[str] = None

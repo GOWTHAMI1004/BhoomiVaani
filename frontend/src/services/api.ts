@@ -1,6 +1,10 @@
 import {
   LandListing,
   LandStats,
+  LandProvidersStatus,
+  LandSearchSource,
+  LandSearchFilters,
+  NormalizedProviderRecord,
   AIChatResponse,
   CollaborativeInvestigation,
   ConversationLanguage,
@@ -10,6 +14,7 @@ import {
   Language,
   ModelsHealth
 } from '../types';
+import { parseTimbreSpeechResponse, TimbreSpeechResponse } from './timbreAudio';
 
 const API_BASE = '/api';
 const BACKEND_STARTUP_GUIDANCE = 'Start the API and frontend together from the repository root with `python start.py`, or run FastAPI on port 8000.';
@@ -49,17 +54,10 @@ function requestError(error: unknown, action: string): Error {
 
 export const api = {
   // Lands API
-  async getLands(params?: {
-    district?: string;
-    min_acres?: number;
-    max_acres?: number;
-    max_budget_lakhs?: number;
-    land_type?: string;
-    legal_status?: string;
-    search?: string;
-  }): Promise<LandListing[]> {
+  async getLands(params?: LandSearchFilters & { source?: LandSearchSource }): Promise<LandListing[]> {
     const query = new URLSearchParams();
     if (params) {
+      if (params.source) query.append('source', params.source);
       if (params.district) query.append('district', params.district);
       if (params.min_acres !== undefined) query.append('min_acres', params.min_acres.toString());
       if (params.max_acres !== undefined) query.append('max_acres', params.max_acres.toString());
@@ -76,6 +74,63 @@ export const api = {
       return await res.json();
     } catch (error) {
       throw requestError(error, 'Land listing request');
+    }
+  },
+
+  async getLandProviderStatus(): Promise<LandProvidersStatus> {
+    try {
+      const res = await fetch(`${API_BASE}/lands/providers/status`, {
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (!res.ok) throw await responseError(res, 'Failed to fetch land provider status');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Land provider status request');
+    }
+  },
+
+  async searchLandProviders(
+    source: LandSearchSource,
+    params?: LandSearchFilters
+  ): Promise<NormalizedProviderRecord<LandListing>[]> {
+    const query = new URLSearchParams({ source });
+    if (params) {
+      if (params.district) query.append('district', params.district);
+      if (params.min_acres !== undefined) query.append('min_acres', params.min_acres.toString());
+      if (params.max_acres !== undefined) query.append('max_acres', params.max_acres.toString());
+      if (params.max_budget_lakhs !== undefined) query.append('max_budget_lakhs', params.max_budget_lakhs.toString());
+      if (params.land_type) query.append('land_type', params.land_type);
+      if (params.legal_status) query.append('legal_status', params.legal_status);
+      if (params.search) query.append('search', params.search);
+    }
+    try {
+      const res = await fetch(`${API_BASE}/lands/provider-search?${query.toString()}`, {
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (!res.ok) throw await responseError(res, 'Failed to search land providers');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Land provider search');
+    }
+  },
+
+  async submitLandListing(submission: {
+    listing: LandListing;
+    submitted_as?: 'USER_PROVIDED' | 'BROKER_PROVIDED';
+    source_url?: string | null;
+    coordinate_precision?: 'PARCEL' | 'ADDRESS' | 'LOCALITY' | 'APPROXIMATE' | 'UNKNOWN';
+  }): Promise<NormalizedProviderRecord<LandListing>> {
+    try {
+      const res = await fetch(`${API_BASE}/lands/submissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submission),
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (!res.ok) throw await responseError(res, 'Failed to submit land listing');
+      return await res.json();
+    } catch (error) {
+      throw requestError(error, 'Land listing submission');
     }
   },
 
@@ -120,7 +175,7 @@ export const api = {
   },
 
   // AI Pipeline API
-  async chatWithEvon(
+  async chatWithReasoning(
     query: string,
     language: Language = 'te',
     conversationHistory: { role: string; content: string }[] = [],
@@ -136,7 +191,7 @@ export const api = {
         selected_land_id: selectedLandId
       })
     });
-    if (!res.ok) throw new Error(`Evon Chat API error: ${res.statusText}`);
+    if (!res.ok) throw await responseError(res, 'Reasoning request failed');
     return res.json();
   },
 
@@ -228,14 +283,42 @@ export const api = {
     }
   },
 
-  async speakText(text: string, language: Language = 'te'): Promise<{ audio_base64: string; duration_estimate_sec: number; ai_mode: string }> {
+  async speakText(text: string, language: ConversationLanguage = 'te'): Promise<TimbreSpeechResponse> {
     const res = await fetch(`${API_BASE}/ai/speak`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, language })
     });
-    if (!res.ok) throw new Error(`Timbre TTS error: ${res.statusText}`);
+    if (!res.ok) throw await responseError(res, 'Timbre TTS failed');
+    return parseTimbreSpeechResponse(await res.json());
+  },
+
+  async getBhoomiAvatarStatus(): Promise<{
+    intro_available: boolean;
+    live_lipsync_configured: boolean;
+    live_lipsync_state: 'NOT_CONFIGURED' | 'NOT_PROBED' | 'UNAVAILABLE' | 'AVAILABLE';
+    live_lipsync_message: string;
+    lipsync_auth_configured: boolean;
+    voice_clone_configured: boolean;
+  }> {
+    const res = await fetch(`${API_BASE}/ai/avatar/status`);
+    if (!res.ok) throw await responseError(res, 'Bhoomi avatar status failed');
     return res.json();
+  },
+
+  bhoomiIntroVideoUrl(): string {
+    return `${API_BASE}/ai/avatar/intro`;
+  },
+
+  async generateBhoomiLipSync(audio: Blob): Promise<Blob> {
+    const body = new FormData();
+    body.append('audio_file', audio, 'timbre-response.wav');
+    const res = await fetch(`${API_BASE}/ai/avatar/lipsync`, { method: 'POST', body });
+    if (!res.ok) throw await responseError(res, 'Bhoomi lip-sync failed');
+    if (!res.headers.get('content-type')?.toLowerCase().includes('video/mp4')) {
+      throw new Error('Bhoomi lip-sync did not return an MP4 video.');
+    }
+    return res.blob();
   },
 
   // Broker Claim Checker API

@@ -112,10 +112,13 @@ class PrismaService:
                 if response.status_code == 200:
                     resp_data = response.json()
                     transcript = resp_data.get("transcript")
-                    if not isinstance(transcript, str):
+                    if resp_data.get("success") is not True or not isinstance(transcript, str) or not transcript.strip():
                         self.last_ping_status = "INVALID_RESPONSE"
-                        raise ProviderRequestError("Gnani Prisma returned an invalid transcript response.")
-                    detected_lang = resp_data.get("detected_language_code") or gnani_lang
+                        raise ProviderRequestError("Gnani Prisma returned no usable transcription.")
+                    detected_lang = resp_data.get("detected_language_code")
+                    if not isinstance(detected_lang, str) or not detected_lang.strip():
+                        self.last_ping_status = "INVALID_RESPONSE"
+                        raise ProviderRequestError("Gnani Prisma did not identify the transcription language.")
                     self.last_ping_status = "REQUEST_SUCCEEDED"
                     return transcript.strip(), detected_lang, "GNANI_PRISMA_V3.0", True
                 else:
@@ -143,7 +146,7 @@ class PrismaService:
     async def check_health(self) -> ModelStatusItem:
         if self.mock_mode:
             return ModelStatusItem(
-                model_name="Gnani Prisma v2.5",
+                model_name="Gnani Prisma v3.0",
                 provider="MOCK_MODE",
                 role="STT",
                 connection_status="MOCK_MODE",
@@ -158,7 +161,7 @@ class PrismaService:
         connected = configured and self.last_ping_status == "REQUEST_SUCCEEDED"
         failed = self.last_ping_status not in {"UNKNOWN", "REQUEST_SUCCEEDED"}
         return ModelStatusItem(
-            model_name="Gnani Prisma v2.5",
+            model_name="Gnani Prisma v3.0",
             provider="GNANI_AI",
             role="STT",
             connection_status=(

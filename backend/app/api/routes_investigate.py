@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
@@ -9,7 +8,7 @@ from app.models.ai import (
     InvestigationReportRequest,
 )
 from app.services.report_service import report_service
-from app.services.evon_service import evon_service
+from app.services.reasoning_service import reasoning_service
 from app.services.timbre_service import timbre_service
 from app.services.prisma_service import prisma_service
 from app.services.land_service import land_service
@@ -34,7 +33,7 @@ async def collaborate_investigation(req: CollaborativeInvestigationRequest):
         if req.selected_land_id and not any(land.id == req.selected_land_id for land in available_lands):
             raise HTTPException(status_code=404, detail="Selected demonstration parcel was not found.")
 
-        collab = await evon_service.investigate_collaborative(
+        collab = await reasoning_service.investigate_collaborative(
             query=req.query,
             conversation_language=language,
             available_lands=available_lands,
@@ -48,39 +47,18 @@ async def collaborate_investigation(req: CollaborativeInvestigationRequest):
             ],
         )
 
-        # Speech is optional for the text report, but failures remain visible to the client.
+        # The frontend requests speech after this response so it can show the generating state.
         dialogue_items = collab.get("dialogue_sequence", [])
-
-        if dialogue_items:
-            item = dialogue_items[-1]
-            try:
-                b64, _, dur, voice_used, _ = await asyncio.wait_for(
-                    timbre_service.speak(
-                        text=item.get("text", ""),
-                        language=collab.get("conversation_language", language),
-                        character="bhoomi"
-                    ),
-                    timeout=min(settings.api_timeout_seconds, 20.0),
-                )
-                item["audio_base64"] = b64
-                item["duration_sec"] = dur
-                item["voice_id"] = voice_used
-            except (ProviderRequestError, ProviderUnavailableError) as exc:
-                logger.warning("Bhoomi narration unavailable: %s", exc)
-                item["audio_error"] = str(exc)
-            except TimeoutError:
-                item["audio_error"] = "Timbre speech request timed out; the text investigation is still available."
-                logger.warning("Bhoomi narration timed out")
 
         return CollaborativeInvestigationResponse(
             user_query=collab.get("user_query", req.query),
             conversation_language=collab.get("conversation_language", language),
             matched_land_ids=collab.get("matched_land_ids", []),
             dialogue_sequence=dialogue_items,
-            model_used=collab.get("model_used", "bhoomivaani-dev-adapter"),
-            provider=collab.get("provider", "GNANI_EVON"),
+            model_used=collab.get("model_used", "UNCONFIGURED"),
+            provider=collab.get("provider", "UNCONFIGURED"),
             is_live=collab.get("is_live", False),
-            overall_risk_level=collab.get("overall_risk_level", "MODERATE"),
+            overall_risk_level=collab.get("overall_risk_level", "NOT_ASSESSED"),
             investigation_report=collab.get("investigation_report")
         )
     except HTTPException:
@@ -109,7 +87,7 @@ def download_investigation_report(req: InvestigationReportRequest):
         if land is None:
             raise HTTPException(status_code=404, detail="Selected demonstration parcel was not found.")
 
-    report = evon_service.build_case_report(
+    report = reasoning_service.build_case_report(
         history,
         land,
         [document.model_dump() for document in req.document_analyses],
@@ -124,18 +102,13 @@ def download_investigation_report(req: InvestigationReportRequest):
 @router.get("/models/status", response_model=AIModelsHealthResponse)
 async def get_models_health():
     """
-    Model status endpoint reporting connection status, provider, and live/mock state
-    for Prisma v2.5, Evon/Qwen3, and Timbre v2.5.
+    Model status endpoint for Prisma v3.0, the external reasoning adapter, and Timbre v2.5.
     """
     prisma_stat = await prisma_service.check_health()
-    reasoning_stat = await evon_service.check_health()
+    reasoning_stat = await reasoning_service.check_health()
     timbre_stat = await timbre_service.check_health()
 
-    available_languages = (
-        ["te", "hi", "en"]
-        if settings.mock_mode
-        else reasoning_stat.supported_languages
-    )
+    available_languages = reasoning_stat.supported_languages
 
     return AIModelsHealthResponse(
         active_reasoning_provider=reasoning_stat.provider,
@@ -150,20 +123,20 @@ async def get_models_health():
 @router.post("/provider")
 async def switch_reasoning_provider(req: ProviderSwitchRequest):
     """
-    Allows selecting the documented Evon integration only; there are no fallback providers.
+    Records a provider selection without assuming its endpoint or request format.
     """
-    if req.provider != "GNANI_EVON":
+    provider = req.provider.strip()
+    if not provider:
         raise HTTPException(
-            status_code=400,
-            detail="Only GNANI_EVON is supported. Ollama and synthetic reasoning are not available.",
+            status_code=422,
+            detail="A reasoning provider name is required.",
         )
-
-    evon_service.provider = req.provider
-    settings.reasoning_provider = req.provider
-    logger.info(f"Switched reasoning provider to {req.provider}")
+    reasoning_service.provider = provider
+    settings.reasoning_provider = provider
+    logger.info("Selected an external reasoning provider adapter: %s", provider)
 
     return {
         "status": "success",
-        "new_provider": req.provider,
-        "model_info": await evon_service.get_active_model_info()
+        "new_provider": provider,
+        "model_info": await reasoning_service.get_active_model_info()
     }

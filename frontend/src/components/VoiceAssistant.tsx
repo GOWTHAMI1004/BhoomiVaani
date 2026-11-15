@@ -55,7 +55,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
         : language === 'hi'
         ? "नमस्ते! मैं भूमिवाणी वॉयस असिस्टेंट हूं। हैदराबाद व तेलंगाना में कृषि भूमि के कानूनी दस्तावेज, बैंक बकाया और हाईवे दावों की जांच के लिए बोलें या लिखें।"
         : "Namaste! I am BhoomiVaani, your voice-first land-awareness guide. Ask about a synthetic demo parcel, documents to request, or an unverified infrastructure claim.",
-      ai_mode: "SYNTHETIC DEMO MODE",
+      ai_mode: "BHOOMIVAANI",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -143,13 +143,13 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({
     setLoadingStage('reasoning');
 
     try {
-      // Build conversation history format for Evon
+      // Keep recent turns for the configured reasoning provider.
       const historyPayload = messages.slice(-6).map(m => ({
         role: m.role,
         content: m.content
       }));
 
-      const res = await api.chatWithEvon(queryText, conversationLanguage, historyPayload);
+      const res = await api.chatWithReasoning(queryText, conversationLanguage, historyPayload);
 
       // Trigger highlight of matched lands
       if (res.matched_land_ids && res.matched_land_ids.length > 0) {

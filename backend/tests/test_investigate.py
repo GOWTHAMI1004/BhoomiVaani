@@ -17,9 +17,10 @@ def test_models_health():
     assert data["prisma_stt"]["role"] == "STT"
     assert data["reasoning"]["role"] == "REASONING"
     assert data["timbre_tts"]["role"] == "TTS"
-    assert data["reasoning"]["model_name"] == "bhoomivaani-synthetic-demo"
-    assert data["mock_mode"] is True
-    assert data["available_conversation_languages"] == ["te", "hi", "en"]
+    assert data["reasoning"]["model_name"] == "Unselected external reasoning model"
+    assert data["reasoning"]["connection_status"] == "NOT_CONFIGURED"
+    assert data["mock_mode"] is False
+    assert data["available_conversation_languages"] == []
 
 def test_collaborative_investigation_keesara():
     payload = {
@@ -27,49 +28,33 @@ def test_collaborative_investigation_keesara():
         "conversation_language": "en"
     }
     res = client.post("/api/investigate/collaborate", json=payload)
-    assert res.status_code == 200
-    data = res.json()
-    assert "bv-hyd-04" in data["matched_land_ids"]
-    assert len(data["dialogue_sequence"]) == 5
-    characters = [d["character"] for d in data["dialogue_sequence"]]
-    assert characters == ["bhoomi", "nyaya", "infra", "amma", "bhoomi"]
-    assert data["is_live"] is False
-    assert data["investigation_report"]["evidence_classification"] == "SYNTHETIC_DEMONSTRATION_DATA"
-    assert data["investigation_report"]["ownership_and_title"]["status"] == "NOT_VERIFIED"
-
-    # Only the final Bhoomi summary is sent to Timbre.
-    for item in data["dialogue_sequence"][:-1]:
-        assert item["audio_base64"] is None
-        assert item["audio_error"] is None
-    final_turn = data["dialogue_sequence"][-1]
-    assert final_turn["audio_base64"] is None
-    assert "disabled in mock mode" in final_turn["audio_error"]
+    assert res.status_code == 503
+    assert "no external LLM provider has been selected" in res.json()["detail"]
 
 def test_generic_safety_question_does_not_select_an_arbitrary_parcel():
     response = client.post("/api/investigate/collaborate", json={
         "query": "Is this land safe to buy?",
         "conversation_language": "en",
     })
-    assert response.status_code == 200
-    data = response.json()
-    report = data["investigation_report"]
-    assert data["matched_land_ids"] == []
-    assert data["overall_risk_level"] == "NOT_ASSESSED"
-    assert report["property"]["id"] is None
-    assert report["ownership_and_title"]["status"] == "NOT_ASSESSED"
-    assert "No parcel was identified" in report["disclaimer"]
+    assert response.status_code == 503
+    assert "no external LLM provider has been selected" in response.json()["detail"]
 
 
 def test_acreage_and_broad_city_alone_do_not_select_a_synthetic_parcel():
-    from app.services.evon_service import evon_service
+    from app.services.reasoning_service import reasoning_service
     from app.services.land_service import land_service
 
-    selected = evon_service._select_land(
+    selected = reasoning_service._select_land(
         "I am looking for 6 acres near Hyderabad.",
         land_service.get_all(),
         None,
     )
     assert selected is None
+    response = client.post("/api/investigate/collaborate", json={
+        "query": "I am looking for 6 acres near Hyderabad.",
+        "conversation_language": "en",
+    })
+    assert response.status_code == 503
 
 
 def test_conversation_report_includes_user_claims_document_scan_and_disclaimers():
@@ -141,10 +126,10 @@ def test_conversation_report_marks_local_script_text_that_its_font_cannot_render
 
 
 def test_broker_claim_report_uses_claim_specific_checks_and_missing_information_status():
-    from app.services.evon_service import evon_service
+    from app.services.reasoning_service import reasoning_service
 
     statement = "The broker says the seller owns this land and a highway is coming nearby."
-    missing_report = evon_service._build_case_report(statement, [], None, [])
+    missing_report = reasoning_service._build_case_report(statement, [], None, [])
     missing_claim = missing_report["broker_claims"][0]
     assert missing_claim["status"] == "MISSING_INFORMATION"
     assert any("chain of title" in check for check in missing_claim["required_checks"])
@@ -154,7 +139,7 @@ def test_broker_claim_report_uses_claim_specific_checks_and_missing_information_
         "filename": "seller-deed.txt",
         "survey_numbers_found": ["SY-123"],
     }
-    supplied_report = evon_service._build_case_report(
+    supplied_report = reasoning_service._build_case_report(
         statement, [], None, [scanned_document]
     )
     supplied_claim = supplied_report["broker_claims"][0]
@@ -163,7 +148,7 @@ def test_broker_claim_report_uses_claim_specific_checks_and_missing_information_
 
 
 def test_broker_claim_answer_is_remembered_after_follow_up_questions():
-    from app.services.evon_service import evon_service
+    from app.services.reasoning_service import reasoning_service
 
     history = [
         {"role": "user", "content": "I want to buy agricultural land near Shadnagar."},
@@ -172,7 +157,7 @@ def test_broker_claim_answer_is_remembered_after_follow_up_questions():
         {"role": "assistant", "content": "What did the broker tell you about the land?"},
     ]
     claim = "He offered 5 acres at 25 lakhs per acre and says there are no legal problems."
-    context = evon_service._build_buyer_context(claim, history)
+    context = reasoning_service._build_buyer_context(claim, history)
     assert context["broker_status"] == "YES"
     assert claim in context["broker_statements"]
     assert context["next_missing_detail"] == "the village and survey/subdivision number, if known"
@@ -181,7 +166,7 @@ def test_broker_claim_answer_is_remembered_after_follow_up_questions():
         {"role": "user", "content": claim},
         {"role": "assistant", "content": "Do you know the survey or subdivision number?"},
     ]
-    after_survey_answer = evon_service._build_buyer_context(
+    after_survey_answer = reasoning_service._build_buyer_context(
         "I don't know the survey number.", next_history
     )
     assert claim in after_survey_answer["broker_statements"]
@@ -189,17 +174,12 @@ def test_broker_claim_answer_is_remembered_after_follow_up_questions():
 
 
 def test_collaborative_investigation_telugu():
-    payload = {
-        "query": "హైదరాబాద్ దగ్గర 6 ఎకరాల భూమి చూడాలి. బ్రోకర్ మెట్రో వస్తుందని చెప్పారు, ఇది సురక్షితమేనా?",
-        "conversation_language": "te"
-    }
-    res = client.post("/api/investigate/collaborate", json=payload)
-    assert res.status_code == 200
-    data = res.json()
-    assert data["conversation_language"] == "te"
-    bhoomi_speech = next(d for d in data["dialogue_sequence"] if d["character"] == "bhoomi")
-    assert "భూమి" in bhoomi_speech["text"] or "నమస్కారం" in bhoomi_speech["text"]
-
+    response = client.post("/api/investigate/collaborate", json={
+        "query": "Check a Telugu land parcel.",
+        "conversation_language": "te",
+    })
+    assert response.status_code == 503
+    assert "no external LLM provider has been selected" in response.json()["detail"]
 def test_all_spoken_investigation_turns_use_the_single_bhoomi_voice(monkeypatch):
     from app.api import routes_investigate
 
@@ -236,7 +216,7 @@ def test_all_spoken_investigation_turns_use_the_single_bhoomi_voice(monkeypatch)
         "is_live": True,
         "overall_risk_level": "NOT_ASSESSED",
     })
-    monkeypatch.setattr(routes_investigate.evon_service, "investigate_collaborative", investigate)
+    monkeypatch.setattr(routes_investigate.reasoning_service, "investigate_collaborative", investigate)
     speak = AsyncMock(return_value=("audio", "GNANI_TIMBRE_V2.5", 1.0, "Trupti", True))
     monkeypatch.setattr(routes_investigate.timbre_service, "speak", speak)
 
@@ -256,11 +236,10 @@ def test_all_spoken_investigation_turns_use_the_single_bhoomi_voice(monkeypatch)
         {"role": "assistant", "content": "Which title papers have you received?"},
     ]
     assert investigate.await_args.kwargs["document_analyses"] == [document_scan]
-    assert speak.await_count == 1
-    assert speak.await_args.kwargs["character"] == "bhoomi"
+    assert speak.await_count == 0
     dialogue = response.json()["dialogue_sequence"]
     assert dialogue[0]["audio_base64"] is None
-    assert dialogue[-1]["audio_base64"] == "audio"
+    assert dialogue[-1]["audio_base64"] is None
 
 def test_investigation_rejects_empty_question():
     response = client.post("/api/investigate/collaborate", json={
@@ -278,10 +257,10 @@ def test_investigation_rejects_unknown_selected_land():
     assert response.status_code == 404
 
 def test_switch_reasoning_provider():
-    res = client.post("/api/investigate/provider", json={"provider": "MOCK_DEV_ADAPTER"})
+    res = client.post("/api/investigate/provider", json={"provider": "EXTERNAL_TEST_PROVIDER"})
     assert res.status_code == 200
     data = res.json()
-    assert data["new_provider"] == "MOCK_DEV_ADAPTER"
+    assert data["new_provider"] == "EXTERNAL_TEST_PROVIDER"
 
 @pytest.mark.asyncio
 async def test_speech_status_requires_a_successful_provider_request(monkeypatch):
@@ -310,125 +289,21 @@ async def test_speech_status_requires_a_successful_provider_request(monkeypatch)
     assert (await timbre_service.check_health()).connection_status == "CONNECTED"
 
 @pytest.mark.asyncio
-async def test_ollama_status_requires_configured_model_to_be_available(monkeypatch):
+async def test_unselected_reasoning_provider_stays_unconfigured(monkeypatch):
     from app.config import settings
-    from app.services.evon_service import evon_service
+    from app.services.ai_errors import ProviderUnavailableError
+    from app.services.reasoning_service import reasoning_service
 
-    monkeypatch.setattr(settings, "mock_mode", False)
-    monkeypatch.setattr(evon_service, "provider", "QWEN3_OLLAMA")
-    monkeypatch.setattr(evon_service, "ollama_model", "qwen3:test")
-    monkeypatch.setattr(evon_service, "_ollama_model_available", AsyncMock(return_value=False))
-    offline = await evon_service.check_health()
-    assert offline.connection_status == "OFFLINE"
-    assert offline.is_live is False
+    monkeypatch.setattr(settings, "reasoning_provider", "")
+    monkeypatch.setattr(reasoning_service, "provider", "")
+    status = await reasoning_service.check_health()
+    assert status.connection_status == "NOT_CONFIGURED"
+    assert status.provider == "UNCONFIGURED"
 
-    monkeypatch.setattr(evon_service, "_ollama_model_available", AsyncMock(return_value=True))
-    connected = await evon_service.check_health()
-    assert connected.connection_status == "CONNECTED"
-    assert connected.is_live is True
-
-@pytest.mark.asyncio
-async def test_ollama_model_check_uses_native_tags_endpoint(monkeypatch):
-    from app.services.evon_service import evon_service
-
-    monkeypatch.setattr(evon_service, "ollama_url", "http://localhost:11434/api/chat")
-    monkeypatch.setattr(evon_service, "ollama_model", "qwen3:test")
-
-    class Response:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return {"models": [{"name": "qwen3:test"}]}
-
-    class Client:
-        def __init__(self, **_):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_):
-            return None
-
-        async def get(self, url):
-            assert url == "http://localhost:11434/api/tags"
-            return Response()
-
-    monkeypatch.setattr("app.services.evon_service.httpx.AsyncClient", Client)
-
-    assert await evon_service._ollama_model_available() is True
-
-@pytest.mark.asyncio
-async def test_ollama_reasoning_uses_native_chat_without_thinking(monkeypatch):
-    from app.services.evon_service import evon_service
-
-    monkeypatch.setattr(evon_service, "ollama_url", "http://localhost:11434/api/chat")
-    monkeypatch.setattr(evon_service, "ollama_model", "qwen3:test")
-    monkeypatch.setattr(evon_service, "_ollama_model_available", AsyncMock(return_value=True))
-    generated = {"response": "Check the original title deed and current certified records."}
-    document_analyses = [{
-        "filename": "seller-deed.txt",
-        "summary": "Text scan flags a possible mortgage reference.",
-        "detected_issues": [],
-    }]
-
-    class Response:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return {"message": {"content": json.dumps(generated)}}
-
-    class Client:
-        def __init__(self, **_):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_):
-            return None
-
-        async def post(self, url, json):
-            assert url == "http://localhost:11434/api/chat"
-            assert json["think"] is False
-            assert json["stream"] is False
-            assert json["format"] == "json"
-            assert json["options"]["num_ctx"] == 2048
-            assert json["options"]["num_batch"] == 128
-            prompt = json_module.loads(json["messages"][1]["content"])
-            assert prompt["conversation_history"] == [
-                {"role": "user", "content": "I am considering the parcel near Keesara."}
-            ]
-            assert prompt["buyer_context"]["preferred_location"] == "Keesara"
-            assert prompt["document_analyses"] == document_analyses
-            assert prompt["verified_listing_source_available"] is False
-            assert "`response`" in json["messages"][0]["content"]
-            assert "No verified listing feed is configured" in json["messages"][0]["content"]
-            assert json["options"]["num_predict"] == 256
-            return Response()
-
-    monkeypatch.setattr("app.services.evon_service.httpx.AsyncClient", Client)
-
-    result = await evon_service._run_ollama_reasoning(
-        "What about the title documents?",
-        "en",
-        [],
-        None,
-        [{"role": "user", "content": "I am considering the parcel near Keesara."}],
-        document_analyses,
-    )
-
-    assert result["provider"] == "QWEN3_OLLAMA"
-    assert result["model_used"] == "qwen3:test"
-    assert len(result["dialogue_sequence"]) == 1
-    assert result["dialogue_sequence"][0]["character"] == "bhoomi"
-    assert result["dialogue_sequence"][0]["text"] == generated["response"]
-
-
+    with pytest.raises(ProviderUnavailableError, match="no external LLM provider has been selected"):
+        await reasoning_service.reason("Check this parcel.")
 def test_buyer_context_retains_preferences_claims_documents_and_concerns():
-    from app.services.evon_service import evon_service
+    from app.services.reasoning_service import reasoning_service
 
     history = [
         {"role": "user", "content": "I want to buy land near Hyderabad."},
@@ -442,7 +317,7 @@ def test_buyer_context_retains_preferences_claims_documents_and_concerns():
         },
     ]
 
-    context = evon_service._build_buyer_context("Anything else?", history)
+    context = reasoning_service._build_buyer_context("Anything else?", history)
 
     assert context["buying_intent"] is True
     assert context["preferred_location"] == "Hyderabad"
@@ -456,22 +331,22 @@ def test_buyer_context_retains_preferences_claims_documents_and_concerns():
 
 
 def test_buyer_context_splits_broker_path_from_yes_or_no_answer():
-    from app.services.evon_service import evon_service
+    from app.services.reasoning_service import reasoning_service
 
     history = [
         {"role": "user", "content": "I want to buy land near Shadnagar."},
         {"role": "assistant", "content": "Have you already approached a broker?"},
     ]
 
-    broker = evon_service._build_buyer_context("Yes", history)
-    independent = evon_service._build_buyer_context("No, not yet", history)
+    broker = reasoning_service._build_buyer_context("Yes", history)
+    independent = reasoning_service._build_buyer_context("No, not yet", history)
 
     assert broker["broker_status"] == "YES"
     assert broker["next_missing_detail"] == "what the broker said about the parcel"
     assert independent["broker_status"] == "NO"
     assert independent["next_missing_detail"] == "land type"
 
-    later_turn = evon_service._build_buyer_context(
+    later_turn = reasoning_service._build_buyer_context(
         "Agricultural land",
         [
             *history,
@@ -484,9 +359,9 @@ def test_buyer_context_splits_broker_path_from_yes_or_no_answer():
 
 
 def test_broker_price_is_not_mistaken_for_buyer_budget():
-    from app.services.evon_service import evon_service
+    from app.services.reasoning_service import reasoning_service
 
-    context = evon_service._build_buyer_context(
+    context = reasoning_service._build_buyer_context(
         "The broker showed me 5 acres near Shadnagar for 25 lakhs per acre and says the title is clear.",
         [
             {"role": "user", "content": "I want to buy land near Shadnagar."},
@@ -501,52 +376,6 @@ def test_broker_price_is_not_mistaken_for_buyer_budget():
     assert context["asking_price_per_acre"] == "25 lakhs"
     assert context["budget"] is None
     assert context["next_missing_detail"] == "whether the broker supplied documents or a survey number"
-
-
-@pytest.mark.asyncio
-async def test_reason_forwards_conversation_history_to_ollama(monkeypatch):
-    from app.services.evon_service import evon_service
-
-    history = [
-        {"role": "user", "content": "I want to buy land."},
-        {"role": "assistant", "content": "Which location are you considering?"},
-        {"role": "user", "content": "Near Hyderabad."},
-    ]
-    investigation = {
-        "dialogue_sequence": [],
-        "matched_land_ids": [],
-        "provider": "QWEN3_OLLAMA",
-        "model_used": "qwen3:test",
-        "is_live": True,
-    }
-    mocked_investigation = AsyncMock(return_value=investigation)
-    monkeypatch.setattr(evon_service, "investigate_collaborative", mocked_investigation)
-
-    await evon_service.reason(
-        "What type of land?",
-        "en",
-        conversation_history=history,
-    )
-
-    assert mocked_investigation.await_args.args == (
-        "What type of land?",
-        "en",
-        None,
-        None,
-        history,
-    )
-
-@pytest.mark.asyncio
-async def test_unsupported_reasoning_provider_is_not_reported_as_ollama(monkeypatch):
-    from app.config import settings
-    from app.services.evon_service import evon_service
-
-    monkeypatch.setattr(settings, "mock_mode", False)
-    monkeypatch.setattr(evon_service, "provider", "UNSUPPORTED")
-    status = await evon_service.check_health()
-    assert status.provider == "UNSUPPORTED"
-    assert status.connection_status == "UNAVAILABLE"
-    assert status.is_live is False
 
 
 def test_synthetic_infrastructure_claim_is_never_verified():

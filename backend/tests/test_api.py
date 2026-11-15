@@ -85,14 +85,8 @@ def test_ai_chat_does_not_assign_ambiguous_area_to_a_parcel():
         "language": "en"
     }
     response = client.post("/api/ai/chat", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["matched_land_ids"] == []
-    assert data["ai_mode"] == "SYNTHETIC DEMO MODE"
-    assert data["audio_available"] is False
-    assert "disabled in mock mode" in data["audio_error"]
-    assert "No specific parcel was identified" in data["response"]
-    assert len(data["response"]) > 0
+    assert response.status_code == 503
+    assert "no external LLM provider has been selected" in response.json()["detail"]
 
 def test_ai_chat_prompt_2_plot_4_safety():
     payload = {
@@ -100,12 +94,8 @@ def test_ai_chat_prompt_2_plot_4_safety():
         "language": "en"
     }
     response = client.post("/api/ai/chat", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert "bv-hyd-04" in data["matched_land_ids"]
-    assert any("mortgage" in w.lower() or "lien" in w.lower() for w in data["legal_warnings"])
-    assert "mortgage" in data["response"].lower()
-    assert "synthetic" in data["response"].lower()
+    assert response.status_code == 503
+    assert "no external LLM provider has been selected" in response.json()["detail"]
 
 def test_ai_chat_prompt_3_highway_claim():
     payload = {
@@ -113,9 +103,8 @@ def test_ai_chat_prompt_3_highway_claim():
         "language": "en"
     }
     response = client.post("/api/ai/chat", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert any("RRR" in f or "Highway" in f or "highway" in f.lower() for f in data["infrastructure_findings"])
+    assert response.status_code == 503
+    assert "no external LLM provider has been selected" in response.json()["detail"]
 
 def test_broker_claim_checker_metro():
     payload = {
@@ -204,11 +193,11 @@ def test_text_to_speech():
     payload = {"text": "భూమివాణి కి స్వాగతం", "language": "te"}
     response = client.post("/api/ai/speak", json=payload)
     assert response.status_code == 503
-    assert "disabled in mock mode" in response.json()["detail"]
+    assert "GNANI_API_KEY is required" in response.json()["detail"]
 
 def test_speech_to_text():
     mock_audio = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80\x3e\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     files = {"file": ("mock.wav", mock_audio, "audio/wav")}
     response = client.post("/api/ai/transcribe", files=files, data={"language": "en"})
     assert response.status_code == 503
-    assert "disabled in mock mode" in response.json()["detail"]
+    assert "GNANI_API_KEY is required" in response.json()["detail"]

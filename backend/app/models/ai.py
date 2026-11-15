@@ -41,7 +41,7 @@ class AIChatResponse(BaseModel):
     audio_base64: Optional[str] = None
     audio_available: bool = False
     audio_error: Optional[str] = None
-    ai_mode: str = "MOCK AI"
+    ai_mode: str = "UNCONFIGURED"
 
 class SpeakRequest(BaseModel):
     text: str = Field(min_length=1, max_length=600)
@@ -56,7 +56,7 @@ class SpeakResponse(BaseModel):
     language: str
     character: str = "bhoomi"
     voice_used: str = "Nalini"
-    ai_mode: str = "MOCK AI"
+    ai_mode: str = "GNANI_TIMBRE_V2.5"
     duration_estimate_sec: float = 2.5
 
 class CharacterSpeechItem(BaseModel):
@@ -111,7 +111,7 @@ class CollaborativeInvestigationResponse(BaseModel):
     matched_land_ids: List[str] = Field(default_factory=list)
     dialogue_sequence: List[CharacterSpeechItem] = Field(default_factory=list)
     model_used: str
-    provider: str # 'GNANI_EVON', 'QWEN3_OLLAMA', 'MOCK_DEV_ADAPTER'
+    provider: str # External reasoning provider name, or UNCONFIGURED
     is_live: bool = False
     overall_risk_level: str = "NOT_ASSESSED" # 'NOT_ASSESSED' or 'SYNTHETIC_FLAGS_PRESENT'
     investigation_report: Optional[Dict[str, Any]] = None

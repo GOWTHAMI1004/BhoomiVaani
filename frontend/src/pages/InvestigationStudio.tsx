@@ -1,7 +1,10 @@
-import React, { FormEvent, Suspense, lazy, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import { AlertCircle, ArrowUp, ChevronDown, Download, FileUp, Mic, MicOff, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import { api } from '../services/api';
 import { encodeAudioBufferAsWav } from '../services/audio';
+import { createManagedObjectUrl } from '../services/avatarMedia';
+import { attemptMediaPlayback, decodeTimbreWav } from '../services/timbreAudio';
+import { BHOOMI_SPEAKING_VIDEO_URL, BhoomiAvatar } from '../components/BhoomiAvatar';
 import {
   CharacterSpeechItem,
   CharacterState,
@@ -10,15 +13,11 @@ import {
   InvestigationReport,
 } from '../types';
 
-const CharacterUniverse = lazy(() =>
-  import('../components/CharacterUniverse').then((module) => ({ default: module.CharacterUniverse })),
-);
-
 type ConversationEntry = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
-  speech?: CharacterSpeechItem;
+  speech?: CharacterSpeechItem & { lipSyncVideo?: Blob; lipSyncError?: string };
   report?: InvestigationReport | null;
   document?: DocumentAnalysisResponse;
 };
@@ -88,13 +87,23 @@ function getAvatarState(phase: string): CharacterState {
   return 'idle';
 }
 
+function newMessageId(role: 'user' | 'assistant'): string {
+  return `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 export const InvestigationStudio: React.FC = () => {
   const [messages, setMessages] = useState<ConversationEntry[]>([GREETING]);
   const [question, setQuestion] = useState('');
-  const [phase, setPhase] = useState<'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'listening' | 'transcribing' | 'thinking' | 'generating' | 'speaking'>('idle');
   const [notice, setNotice] = useState('');
   const [connectionNotice, setConnectionNotice] = useState('');
   const [playingMessageId, setPlayingMessageId] = useState('');
+  const [liveLipSyncConfigured, setLiveLipSyncConfigured] = useState(false);
+  const [liveLipSyncState, setLiveLipSyncState] = useState<'NOT_CONFIGURED' | 'NOT_PROBED' | 'UNAVAILABLE' | 'AVAILABLE'>('NOT_PROBED');
+  const [voiceCloneConfigured, setVoiceCloneConfigured] = useState(false);
+  const [lipSyncVideoUrl, setLipSyncVideoUrl] = useState('');
+  const [lipSyncUnavailable, setLipSyncUnavailable] = useState(false);
+  const [lipSyncDiagnostic, setLipSyncDiagnostic] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
   const [availableLanguages, setAvailableLanguages] = useState<ConversationLanguage[]>(['en', 'te', 'hi']);
   const [expandedMessageId, setExpandedMessageId] = useState('');
@@ -108,6 +117,8 @@ export const InvestigationStudio: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const recordingTimeoutRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lipSyncVideoRef = useRef<HTMLVideoElement | null>(null);
+  const lipSyncVideoUrlRef = useRef<string | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const animationRef = useRef<number | null>(null);
@@ -116,7 +127,7 @@ export const InvestigationStudio: React.FC = () => {
   const documentInputRef = useRef<HTMLInputElement>(null);
   const lastLanguageRef = useRef<ConversationLanguage>('en');
 
-  const busy = phase === 'transcribing' || phase === 'thinking';
+  const busy = phase === 'transcribing' || phase === 'thinking' || phase === 'generating';
   const isRecording = phase === 'listening';
   const avatarState = getAvatarState(phase);
 
@@ -137,6 +148,19 @@ export const InvestigationStudio: React.FC = () => {
   useEffect(() => { void refreshLanguages(); }, []);
 
   useEffect(() => {
+    let active = true;
+    void api.getBhoomiAvatarStatus().then((status) => {
+      if (!active) return;
+      setLiveLipSyncConfigured(status.live_lipsync_configured);
+      setLiveLipSyncState(status.live_lipsync_state);
+      setVoiceCloneConfigured(status.voice_clone_configured);
+      setLipSyncUnavailable(status.live_lipsync_state === 'UNAVAILABLE' || status.live_lipsync_state === 'NOT_CONFIGURED');
+      setLipSyncDiagnostic(status.live_lipsync_message);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     conversationRef.current?.scrollTo({ top: conversationRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, phase]);
 
@@ -145,6 +169,13 @@ export const InvestigationStudio: React.FC = () => {
     animationRef.current = null;
     audioRef.current?.pause();
     audioRef.current = null;
+    if (lipSyncVideoRef.current) {
+      lipSyncVideoRef.current.pause();
+      lipSyncVideoRef.current.currentTime = 0;
+    }
+    if (lipSyncVideoUrlRef.current) URL.revokeObjectURL(lipSyncVideoUrlRef.current);
+    lipSyncVideoUrlRef.current = null;
+    setLipSyncVideoUrl('');
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     audioUrlRef.current = null;
     const context = audioContextRef.current;
@@ -159,7 +190,9 @@ export const InvestigationStudio: React.FC = () => {
     if (recordingTimeoutRef.current !== null) window.clearTimeout(recordingTimeoutRef.current);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     audioRef.current?.pause();
+    lipSyncVideoRef.current?.pause();
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    if (lipSyncVideoUrlRef.current) URL.revokeObjectURL(lipSyncVideoUrlRef.current);
     if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
     void audioContextRef.current?.close();
   }, []);
@@ -176,6 +209,7 @@ export const InvestigationStudio: React.FC = () => {
     let audio: HTMLAudioElement | null = null;
     let context: AudioContext | null = null;
     let analyser: AnalyserNode | null = null;
+    let mediaSource: MediaElementAudioSourceNode | null = null;
     let cleared = false;
 
     const clear = () => {
@@ -186,6 +220,13 @@ export const InvestigationStudio: React.FC = () => {
       if (audioRef.current === audio) audioRef.current = null;
       if (url && audioUrlRef.current === url) audioUrlRef.current = null;
       if (url) URL.revokeObjectURL(url);
+      if (lipSyncVideoRef.current) {
+        lipSyncVideoRef.current.pause();
+        lipSyncVideoRef.current.currentTime = 0;
+      }
+      if (lipSyncVideoUrlRef.current) URL.revokeObjectURL(lipSyncVideoUrlRef.current);
+      lipSyncVideoUrlRef.current = null;
+      setLipSyncVideoUrl('');
       if (audioContextRef.current === context) audioContextRef.current = null;
       if (context && context.state !== 'closed') void context.close();
       setAudioLevel(0);
@@ -194,34 +235,29 @@ export const InvestigationStudio: React.FC = () => {
     };
 
     try {
-      const binary = atob(speech.audio_base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-      if (
-        bytes.length < 44
-        || String.fromCharCode(...bytes.slice(0, 4)) !== 'RIFF'
-        || String.fromCharCode(...bytes.slice(8, 12)) !== 'WAVE'
-      ) {
-        throw new Error('Timbre returned an invalid WAV file.');
-      }
-
-      const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+      const objectUrl = URL.createObjectURL(decodeTimbreWav(speech.audio_base64, 'audio/wav'));
       const playback = new Audio(objectUrl);
       url = objectUrl;
       audio = playback;
       playback.preload = 'auto';
+      playback.muted = false;
+      playback.volume = 1;
       audioRef.current = playback;
       audioUrlRef.current = objectUrl;
       setPlayingMessageId(entry.id);
-      setPhase('speaking');
+      setPhase('generating');
 
       playback.onended = clear;
       playback.onerror = () => {
         clear();
         setNotice('Audio playback failed. Tap “Hear Bhoomi” to retry, or read her complete response.');
       };
+      playback.onplaying = () => {
+        setNotice('');
+        setPhase('speaking');
+      };
 
-      const startLipSync = async () => {
+      const attachAudioAnalyser = async () => {
         if (typeof AudioContext === 'undefined') return;
         let candidate: AudioContext | null = null;
         try {
@@ -236,18 +272,19 @@ export const InvestigationStudio: React.FC = () => {
             return;
           }
 
-          const mediaSource = candidate.createMediaElementSource(playback);
-          let audioAnalyser: AnalyserNode | null = null;
+          const audioAnalyser = candidate.createAnalyser();
+          audioAnalyser.fftSize = 512;
+          mediaSource = candidate.createMediaElementSource(playback);
           try {
-            audioAnalyser = candidate.createAnalyser();
-            audioAnalyser.fftSize = 512;
             mediaSource.connect(audioAnalyser);
             audioAnalyser.connect(candidate.destination);
           } catch {
+            // A failed meter must never silence the actual media element.
+            try { mediaSource.disconnect(); } catch { /* already disconnected */ }
             mediaSource.connect(candidate.destination);
-            audioAnalyser = null;
+            analyser = null;
+            return;
           }
-          if (!audioAnalyser) return;
           analyser = audioAnalyser;
           const samples = new Uint8Array(audioAnalyser.fftSize);
           const measure = () => {
@@ -263,16 +300,44 @@ export const InvestigationStudio: React.FC = () => {
           };
           measure();
         } catch {
-          if (audioContextRef.current === candidate) audioContextRef.current = null;
-          if (candidate && candidate.state !== 'closed') await candidate.close();
-          if (context === candidate) context = null;
+          if (mediaSource && candidate) {
+            try { mediaSource.disconnect(); } catch { /* already disconnected */ }
+            try { mediaSource.connect(candidate.destination); } catch { /* direct graph fallback */ }
+          } else if (candidate && candidate.state !== 'closed') {
+            await candidate.close();
+            if (audioContextRef.current === candidate) audioContextRef.current = null;
+            if (context === candidate) context = null;
+          }
           analyser = null;
         }
       };
 
-      const playbackPromise = playback.play();
-      void startLipSync();
-      await playbackPromise;
+      if (speech.lipSyncVideo) {
+        const managedUrl = createManagedObjectUrl(speech.lipSyncVideo);
+        lipSyncVideoUrlRef.current = managedUrl.url;
+        setLipSyncVideoUrl(managedUrl.url);
+        if (lipSyncVideoRef.current) lipSyncVideoRef.current.src = managedUrl.url;
+      } else if (lipSyncVideoRef.current) {
+        lipSyncVideoRef.current.src = BHOOMI_SPEAKING_VIDEO_URL;
+      }
+      await attachAudioAnalyser();
+      const video = lipSyncVideoRef.current;
+      if (video) {
+        video.pause();
+        video.currentTime = 0;
+        video.muted = true;
+        video.volume = 0;
+        void video.play().catch(() => setNotice('Bhoomi’s speaking video could not play; her generated voice will continue.'));
+      }
+      const attempt = await attemptMediaPlayback(playback);
+      if (attempt !== 'playing') {
+        video?.pause();
+        clear();
+        setPhase('idle');
+        setNotice(attempt === 'blocked'
+          ? 'Your browser blocked automatic audio. Tap “Hear Bhoomi” to play the generated voice.'
+          : 'The generated voice could not be played. Tap “Hear Bhoomi” to retry.');
+      }
     } catch (error) {
       clear();
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
@@ -310,7 +375,7 @@ export const InvestigationStudio: React.FC = () => {
       .map(({ role, text }) => ({ role, content: text }));
     if (!transcriptAlreadyDisplayed) {
       setMessages((current) => [...current, {
-        id: `user-${Date.now()}`,
+        id: newMessageId('user'),
         role: 'user',
         text: query,
         document: uploadedDocument,
@@ -326,10 +391,38 @@ export const InvestigationStudio: React.FC = () => {
         currentDocuments,
       );
       setConnectionNotice('');
-      const speech = getBhoomiReply(result.dialogue_sequence);
+      const speech: NonNullable<ConversationEntry['speech']> = { ...getBhoomiReply(result.dialogue_sequence) };
       setSelectedLandId(result.matched_land_ids.length === 1 ? result.matched_land_ids[0] : '');
+      setPhase('generating');
+      try {
+        const audio = await api.speakText(speech.text, language);
+        speech.audio_base64 = audio.audio_base64;
+        speech.audio_error = undefined;
+        if (liveLipSyncConfigured) {
+          try {
+            speech.lipSyncVideo = await api.generateBhoomiLipSync(decodeTimbreWav(audio.audio_base64));
+            setLipSyncUnavailable(false);
+            setLiveLipSyncState('AVAILABLE');
+            setLipSyncDiagnostic('A synchronized video was returned for Bhoomi’s latest response.');
+          } catch (lipSyncError) {
+            speech.lipSyncError = lipSyncError instanceof Error
+              ? lipSyncError.message
+              : 'Bhoomi live lip-sync is unavailable.';
+            setLipSyncUnavailable(true);
+            setLiveLipSyncState('UNAVAILABLE');
+            setLipSyncDiagnostic(speech.lipSyncError);
+          }
+        } else {
+          setLipSyncUnavailable(true);
+          setLiveLipSyncState('NOT_CONFIGURED');
+          setLipSyncDiagnostic('Live lip-sync is not configured. Timbre voice playback remains available.');
+        }
+      } catch (audioError) {
+        speech.audio_base64 = undefined;
+        speech.audio_error = audioError instanceof Error ? audioError.message : 'Timbre could not generate audio.';
+      }
       const response: ConversationEntry = {
-        id: `assistant-${Date.now()}`,
+        id: newMessageId('assistant'),
         role: 'assistant',
         text: speech.text,
         speech,
@@ -340,6 +433,8 @@ export const InvestigationStudio: React.FC = () => {
       setPhase('idle');
       if (speech.audio_base64) void playReply(response);
       else if (speech.audio_error) setNotice(speech.audio_error);
+      // Lip-sync availability is shown beneath the avatar instead of repeating
+      // a warning banner in chat after every turn.
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Bhoomi could not complete that response. Please try again.');
       setPhase('idle');
@@ -419,7 +514,7 @@ export const InvestigationStudio: React.FC = () => {
           return;
         }
         setMessages((current) => [...current, {
-          id: `user-${Date.now()}`,
+          id: newMessageId('user'),
           role: 'user',
           text: result.transcript,
         }]);
@@ -451,9 +546,9 @@ export const InvestigationStudio: React.FC = () => {
       setNotice('This browser does not support microphone recording. You can type your question instead.');
       return;
     }
+    stopPlayback();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stopPlayback();
       streamRef.current = stream;
       const preferredType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
         .find((type) => MediaRecorder.isTypeSupported(type));
@@ -519,6 +614,7 @@ export const InvestigationStudio: React.FC = () => {
     listening: 'I’m listening…',
     transcribing: 'Let me hear that clearly…',
     thinking: 'Let me think that through…',
+    generating: 'Preparing Bhoomi’s voice…',
     speaking: 'Bhoomi is speaking',
   })[phase];
   const visibleNotice = notice || connectionNotice;
@@ -547,21 +643,51 @@ export const InvestigationStudio: React.FC = () => {
 
       <main className="conversation-main">
         <section className={`advisor-stage advisor-${avatarState}`} aria-label="Bhoomi, your AI land-buying advisor">
-          <div className="stage-sunlight" />
-          <div className="stage-ground" />
           <div className="avatar-frame">
-            <Suspense fallback={<div className="avatar-loading" aria-label="Loading Bhoomi" />}>
-              <CharacterUniverse state={avatarState} audioLevel={audioLevel} />
-            </Suspense>
+            <BhoomiAvatar
+              state={avatarState}
+              audioLevel={audioLevel}
+              speakingVideoUrl={lipSyncVideoUrl}
+              videoRef={lipSyncVideoRef}
+              onVideoError={() => setNotice('Bhoomi’s speaking video failed; her actual audio playback remains available.')}
+            />
           </div>
           <div className="advisor-intro">
-            <span className="advisor-presence"><i /> {statusText}</span>
             <h1>Bhoomi</h1>
-            <p>A thoughtful guide for your land-buying journey</p>
+            <span className="advisor-presence"><i /> {phase === 'speaking' && !lipSyncVideoUrl
+              ? 'Voice playing · no live mouth sync'
+              : statusText}</span>
+            <p className="avatar-service-status">
+              Gnani voice {voiceCloneConfigured ? 'configured' : 'not configured'} · {liveLipSyncState === 'AVAILABLE'
+                ? 'lip-sync available'
+                : liveLipSyncState === 'NOT_CONFIGURED'
+                  ? 'voice only · lip-sync not configured'
+                  : liveLipSyncState === 'UNAVAILABLE' || lipSyncUnavailable
+                    ? 'voice only · lip-sync unavailable'
+                    : 'lip-sync adapter configured · not yet verified'}
+              {lipSyncDiagnostic && <span role="status">{lipSyncDiagnostic}</span>}
+            </p>
           </div>
+          <button
+            type="button"
+            className={`voice-button ${isRecording ? 'voice-recording' : ''}`}
+            onClick={() => void toggleRecording()}
+            disabled={busy || uploadingDocument}
+            aria-label={isRecording ? 'Stop voice recording' : 'Start voice recording'}
+          >
+            {isRecording ? <MicOff size={25} strokeWidth={1.8} /> : <Mic size={25} strokeWidth={1.8} />}
+            <span className="voice-pulse" />
+          </button>
+          <span className="voice-instruction">
+            {isRecording ? 'Tap when you’ve finished speaking' : 'Tap to talk with Bhoomi'}
+          </span>
         </section>
 
         <section className="conversation-panel" aria-label="Conversation with Bhoomi">
+          <div className="chat-panel-header">
+            <strong>Conversation with Bhoomi</strong>
+            <span>{statusText}</span>
+          </div>
           <div className="conversation-scroll" ref={conversationRef} aria-live="polite">
             {messages.map((message, index) => (
               <article className={`message message-${message.role}`} key={message.id}>
@@ -636,13 +762,11 @@ export const InvestigationStudio: React.FC = () => {
             {busy && (
               <div className="advisor-thinking" role="status">
                 <span /><span /><span />
-                <p>{phase === 'transcribing' ? 'Listening back to your message' : 'Bhoomi is thinking'}</p>
+                <p>{phase === 'transcribing' ? 'Processing your recording' : phase === 'generating' ? 'Generating Bhoomi’s voice' : 'Bhoomi is thinking'}</p>
               </div>
             )}
           </div>
-        </section>
-
-        <section className="conversation-composer" aria-label="Ask Bhoomi">
+          <section className="conversation-composer" aria-label="Ask Bhoomi">
           {visibleNotice && (
             <div className="conversation-notice" role="status">
               <AlertCircle size={18} />
@@ -654,19 +778,6 @@ export const InvestigationStudio: React.FC = () => {
               )}
             </div>
           )}
-          <button
-            type="button"
-            className={`voice-button ${isRecording ? 'voice-recording' : ''}`}
-            onClick={() => void toggleRecording()}
-            disabled={busy || uploadingDocument}
-            aria-label={isRecording ? 'Stop voice recording' : 'Start voice recording'}
-          >
-            {isRecording ? <MicOff size={27} strokeWidth={1.8} /> : <Mic size={27} strokeWidth={1.8} />}
-            <span className="voice-pulse" />
-          </button>
-          <span className="voice-instruction">
-            {isRecording ? 'Tap when you’ve finished speaking' : 'Tap to talk with Bhoomi'}
-          </span>
           <form className="text-composer" onSubmit={submitQuestion}>
             <input
               ref={documentInputRef}
@@ -687,9 +798,15 @@ export const InvestigationStudio: React.FC = () => {
             >
               <FileUp size={18} />
             </button>
-            <input
+            <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
               placeholder="Or type what you’d like to know…"
               aria-label="Type a question for Bhoomi"
               disabled={busy || isRecording || uploadingDocument}
@@ -698,7 +815,7 @@ export const InvestigationStudio: React.FC = () => {
               <ArrowUp size={19} />
             </button>
           </form>
-          <p className="privacy-note">Speak naturally. Bhoomi will reply in your language.</p>
+          </section>
         </section>
       </main>
       <footer className="conversation-footer">

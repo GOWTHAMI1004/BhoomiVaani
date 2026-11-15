@@ -1,6 +1,13 @@
 [
   {
     "id": "bv-hyd-01",
+    "record_provenance": {
+      "classification": "SYNTHETIC_DEMONSTRATION",
+      "source_label": "BhoomiVaani synthetic demonstration dataset",
+      "source_url": null,
+      "last_updated": null,
+      "evidence_references": []
+    },
     "title": "Sri Venkateshwara Farm Groves",
     "location": "Chevella",
     "district": "Ranga Reddy",
@@ -48,6 +55,13 @@
   },
   {
     "id": "bv-hyd-02",
+    "record_provenance": {
+      "classification": "SYNTHETIC_DEMONSTRATION",
+      "source_label": "BhoomiVaani synthetic demonstration dataset",
+      "source_url": null,
+      "last_updated": null,
+      "evidence_references": []
+    },
     "title": "Ananthagiri Eco Terraces",
     "location": "Vikarabad Hills",
     "district": "Vikarabad",
@@ -88,6 +102,13 @@
   },
   {
     "id": "bv-hyd-03",
+    "record_provenance": {
+      "classification": "SYNTHETIC_DEMONSTRATION",
+      "source_label": "BhoomiVaani synthetic demonstration dataset",
+      "source_url": null,
+      "last_updated": null,
+      "evidence_references": []
+    },
     "title": "Pragati Highway Agri-Vistas",
     "location": "Shadnagar (Kothur Belt)",
     "district": "Ranga Reddy",
@@ -128,6 +149,13 @@
   },
   {
     "id": "bv-hyd-04",
+    "record_provenance": {
+      "classification": "SYNTHETIC_DEMONSTRATION",
+      "source_label": "BhoomiVaani synthetic demonstration dataset",
+      "source_url": null,
+      "last_updated": null,
+      "evidence_references": []
+    },
     "title": "Keesara Sunrise Meadows (Plot 4)",
     "location": "Keesara Gutta Belt",
     "district": "Medchal-Malkajgiri",
@@ -181,6 +209,13 @@
   },
   {
     "id": "bv-hyd-05",
+    "record_provenance": {
+      "classification": "SYNTHETIC_DEMONSTRATION",
+      "source_label": "BhoomiVaani synthetic demonstration dataset",
+      "source_url": null,
+      "last_updated": null,
+      "evidence_references": []
+    },
     "title": "Yadadri Divine Orchard Acreage",
     "location": "Bhuvanagiri - Yadagirigutta",
     "district": "Yadadri Bhuvanagiri",
@@ -221,6 +256,13 @@
   },
   {
     "id": "bv-hyd-06",
+    "record_provenance": {
+      "classification": "SYNTHETIC_DEMONSTRATION",
+      "source_label": "BhoomiVaani synthetic demonstration dataset",
+      "source_url": null,
+      "last_updated": null,
+      "evidence_references": []
+    },
     "title": "Medak Heritage Farmlands",
     "location": "Narsapur Green Belt",
     "district": "Medak",

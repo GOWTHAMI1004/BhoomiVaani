@@ -2,8 +2,6 @@ import json
 import hashlib
 import logging
 import re
-import time
-from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -18,110 +16,135 @@ logger = logging.getLogger(__name__)
 
 
 class ReasoningService:
-    """Uses Evon through an explicitly configured vLLM-compatible endpoint."""
+    """Provider-neutral reasoning boundary with a Gemini generateContent adapter."""
 
-    def __init__(self):
-        self.provider = settings.reasoning_provider
-        self.api_base_url = settings.evon_api_base_url
-        self.model = settings.evon_model
+    def __init__(self, transport: Optional[httpx.AsyncBaseTransport] = None):
+        self.provider = settings.reasoning_provider.upper()
+        self.api_key = settings.reasoning_api_key
+        self.api_base_url = settings.reasoning_api_base_url
+        self.model = settings.reasoning_model
+        self.timeout_seconds = settings.api_timeout_seconds
+        self._transport = transport
         self.last_response_time_ms = 0.0
 
+    def _gemini_configuration_error(self) -> Optional[str]:
+        if not self.provider:
+            return "Reasoning is unavailable: no external LLM provider has been selected."
+        if self.provider != "GEMINI":
+            return "Reasoning is unavailable: configure REASONING_PROVIDER=GEMINI to use the Gemini adapter."
+        missing = [
+            name for name, value in (
+                ("REASONING_API_KEY", self.api_key),
+                ("REASONING_API_BASE_URL", self.api_base_url),
+                ("REASONING_MODEL", self.model),
+            ) if not value.strip()
+        ]
+        if missing:
+            return "Reasoning is unavailable: missing configuration " + ", ".join(missing) + "."
+        return None
+
+    @staticmethod
+    def _language_name(language: str) -> str:
+        return {
+            "en": "English", "te": "Telugu", "hi": "Hindi", "ta": "Tamil",
+            "kn": "Kannada", "ml": "Malayalam", "bn": "Bengali", "gu": "Gujarati",
+            "pa": "Punjabi", "mr": "Marathi",
+        }.get(language.lower().split("-", 1)[0], language)
+
+    async def _generate_gemini_content(
+        self, query: str, language: str, conversation_history: Optional[List[Dict[str, str]]],
+        context: Dict[str, Any],
+    ) -> str:
+        configuration_error = self._gemini_configuration_error()
+        if configuration_error:
+            raise ProviderUnavailableError(configuration_error)
+
+        language_name = self._language_name(language)
+        system_instruction = (
+            "You are Bhoomi, a careful, conversational land-purchase advisor. "
+            f"Respond in {language_name}, the user's language for this turn. Preserve the language of code-mixed input. "
+            "Ask at most one concise follow-up question when needed. Use only facts in the supplied context; "
+            "never invent listings, prices, official records, facilities, legal findings, or verification. "
+            "Clearly label synthetic demonstration records and user-provided claims. Never certify title, promise legal safety, "
+            "or present this response as legal advice. If evidence is insufficient, say so plainly."
+        )
+        contents: List[Dict[str, Any]] = []
+        for message in conversation_history or []:
+            role = "model" if message.get("role") == "assistant" else "user"
+            text = message.get("content")
+            if role not in {"model", "user"} or not isinstance(text, str) or not text.strip():
+                continue
+            contents.append({"role": role, "parts": [{"text": text}]})
+        context_text = json.dumps(context, ensure_ascii=False, default=str)
+        contents.append({"role": "user", "parts": [{
+            "text": f"Investigation context (data may be synthetic; follow its evidence labels):\n{context_text}\n\nUser's current message:\n{query}"
+        }]})
+
+        url = f"{self.api_base_url.rstrip('/')}/models/{self.model}:generateContent"
+        payload = {
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "contents": contents,
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1200},
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds, transport=self._transport
+            ) as client:
+                response = await client.post(
+                    url,
+                    headers={"x-goog-api-key": self.api_key, "Content-Type": "application/json"},
+                    json=payload,
+                )
+            if response.status_code in (401, 403):
+                raise ProviderRequestError("Gemini rejected the configured API credentials (HTTP authentication error).")
+            if response.status_code == 429:
+                raise ProviderRequestError("Gemini rate limit reached. Please retry later.")
+            if response.status_code >= 500:
+                raise ProviderRequestError(f"Gemini is temporarily unavailable (HTTP {response.status_code}).")
+            if response.status_code >= 400:
+                raise ProviderRequestError(f"Gemini rejected the request (HTTP {response.status_code}). Check model and request configuration.")
+            try:
+                result = response.json()
+                text = "".join(
+                    part.get("text", "")
+                    for candidate in result.get("candidates", [])[:1]
+                    for part in candidate.get("content", {}).get("parts", [])
+                    if isinstance(part.get("text"), str)
+                ).strip()
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise ProviderRequestError("Gemini returned an invalid response format.") from exc
+            if not text:
+                raise ProviderRequestError("Gemini returned no text for this request.")
+            return text
+        except ProviderRequestError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise ProviderRequestError("Gemini request timed out. Please retry.") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderRequestError("Gemini could not be reached. Check network and endpoint configuration.") from exc
+
     async def get_active_model_info(self) -> Tuple[str, str, bool]:
-        if self.provider != "GNANI_EVON":
-            return self.provider, "unsupported provider", False
-        if not self.api_base_url or not self.model:
-            return "GNANI_EVON", "unconfigured", False
-        return "GNANI_EVON", self.model, False
+        if not self.provider:
+            return "UNCONFIGURED", "No reasoning provider selected", False
+        error = self._gemini_configuration_error()
+        if error:
+            return self.provider, error, False
+        return self.provider, f"Gemini generateContent ({self.model}) configured", False
 
     async def check_health(self) -> ModelStatusItem:
-        if settings.mock_mode:
-            return ModelStatusItem(
-                model_name="Gnani Evon v3.3",
-                provider=self.provider,
-                role="REASONING",
-                connection_status="CONFIGURATION_ERROR",
-                is_live=False,
-                endpoint="",
-                last_ping_status="MOCK_MODE_DISABLED",
-                supported_languages=[],
-                note="MOCK_MODE=true disables live reasoning; synthetic reasoning is not used. Set MOCK_MODE=false.",
-            )
-        if self.provider != "GNANI_EVON":
-            return ModelStatusItem(
-                model_name="unconfigured",
-                provider=self.provider,
-                role="REASONING",
-                connection_status="CONFIGURATION_ERROR",
-                is_live=False,
-                endpoint="",
-                last_ping_status="UNSUPPORTED_PROVIDER",
-                supported_languages=[],
-                note=(
-                    f"REASONING_PROVIDER='{self.provider}' is unsupported. Ollama and synthetic reasoning "
-                    "are not used. Set REASONING_PROVIDER=GNANI_EVON and configure an Evon vLLM-compatible endpoint."
-                ),
-            )
-        if not self.api_base_url or not self.model:
-            return ModelStatusItem(
-                model_name="Gnani Evon v3.3",
-                provider="GNANI_EVON",
-                role="REASONING",
-                connection_status="NOT_CONFIGURED",
-                is_live=False,
-                endpoint="",
-                last_ping_status="MISSING_ENDPOINT_OR_MODEL",
-                supported_languages=["en", "hi", "bn", "te", "ta", "mr", "gu", "kn", "ml", "pa"],
-                note=(
-                    "No hosted Evon inference API is documented. Configure EVON_API_BASE_URL and EVON_MODEL "
-                    "for a vLLM-compatible Evon deployment; no alternative provider is used."
-                ),
-            )
-        endpoint = self._endpoint_url()
-        if endpoint is None:
-            return ModelStatusItem(
-                model_name=self.model,
-                provider="GNANI_EVON",
-                role="REASONING",
-                connection_status="CONFIGURATION_ERROR",
-                is_live=False,
-                endpoint="",
-                last_ping_status="INVALID_ENDPOINT",
-                supported_languages=["en", "hi", "bn", "te", "ta", "mr", "gu", "kn", "ml", "pa"],
-                note="EVON_API_BASE_URL must be an HTTP(S) base URL without credentials, query, or fragment.",
-            )
+        configuration_error = self._gemini_configuration_error()
+        configured = configuration_error is None
         return ModelStatusItem(
-            model_name=self.model,
-            provider="GNANI_EVON",
+            model_name=self.model or "Unselected external reasoning model",
+            provider=self.provider or "UNCONFIGURED",
             role="REASONING",
-            connection_status="CONFIGURED_UNVERIFIED",
+            connection_status="CONFIGURED" if configured else "NOT_CONFIGURED",
             is_live=False,
-            endpoint=self._safe_endpoint_display(),
-            last_ping_status="NOT_PROBED",
-            supported_languages=["en", "hi", "bn", "te", "ta", "mr", "gu", "kn", "ml", "pa"],
-            note="Evon endpoint and model are configured. A successful inference request is required to verify connectivity.",
+            endpoint=(f"{self.api_base_url.rstrip('/')}/models/{self.model}:generateContent" if configured else ""),
+            last_ping_status="NOT_PROBED" if configured else ("INCOMPLETE_CONFIGURATION" if self.provider else "NO_PROVIDER_SELECTED"),
+            supported_languages=[],
+            note=("Gemini generateContent is configured; availability is confirmed only by a successful request." if configured else configuration_error or "Reasoning is unavailable until a provider is configured."),
         )
-
-    def _endpoint_url(self) -> Optional[str]:
-        parsed = urlsplit(self.api_base_url)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-            or parsed.query
-            or parsed.fragment
-        ):
-            return None
-        return f"{self.api_base_url.rstrip('/')}/v1/chat/completions"
-
-    def _safe_endpoint_display(self) -> str:
-        parsed = urlsplit(self.api_base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            return ""
-        host = parsed.hostname
-        if parsed.port:
-            host = f"{host}:{parsed.port}"
-        return f"{parsed.scheme}://{host}"
 
     async def investigate_collaborative(
         self,
@@ -132,36 +155,39 @@ class ReasoningService:
         conversation_history: Optional[List[Dict[str, str]]] = None,
         document_analyses: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        started = time.monotonic()
-        if settings.mock_mode:
-            raise ProviderUnavailableError(
-                "MOCK_MODE=true disables live reasoning. Synthetic reasoning is disabled; set MOCK_MODE=false."
-            )
-        if self.provider != "GNANI_EVON":
-            raise ProviderUnavailableError(
-                f"Reasoning provider '{self.provider}' is unsupported. Set REASONING_PROVIDER=GNANI_EVON; Ollama and synthetic reasoning are not used."
-            )
-        if not self.api_base_url or not self.model:
-            raise ProviderUnavailableError(
-                "Evon reasoning is not configured. Set EVON_API_BASE_URL and EVON_MODEL for an Evon vLLM-compatible inference endpoint; no fallback is used."
-            )
-        endpoint = self._endpoint_url()
-        if endpoint is None:
-            raise ProviderUnavailableError(
-                "EVON_API_BASE_URL must be an HTTP(S) base URL without credentials, query, or fragment."
-            )
-        language = detect_conversation_language(query, conversation_language)
-        result = await self._run_evon_reasoning(
-            query,
-            language,
-            available_lands or [],
-            selected_land_id,
-            conversation_history,
-            document_analyses,
-            endpoint,
+        selected = self._select_land(query, available_lands or [], selected_land_id)
+        context = {
+            # Expose a synthetic parcel to the model only when this investigation
+            # explicitly selected or uniquely matched it. Do not seed unrelated
+            # locations that could be mistaken for buyer-provided facts.
+            "available_properties": [selected.model_dump()] if selected else [],
+            "selected_property_id": selected.id if selected else None,
+            "document_analyses": document_analyses or [],
+        }
+        answer = await self._generate_gemini_content(query, conversation_language, conversation_history, context)
+        report = self._build_case_report(query, conversation_history, selected, document_analyses)
+        speech_item = CharacterSpeechItem(
+            character="bhoomi",
+            character_name="Bhoomi",
+            role="LAND_ADVISOR",
+            text=answer,
+            voice_id="bhoomi",
+            evidence_badge=("DEMO DATA" if selected else "GENERAL GUIDANCE"),
+            evidence_type=("SYNTHETIC_DEMONSTRATION_DATA" if selected else "GENERAL_INFORMATION"),
+            sentiment="analytical",
+            animation_cue="speak",
         )
-        self.last_response_time_ms = round((time.monotonic() - started) * 1000, 1)
-        return result
+        return {
+            "user_query": query,
+            "conversation_language": conversation_language,
+            "matched_land_ids": [selected.id] if selected else [],
+            "dialogue_sequence": [speech_item.model_dump()],
+            "model_used": self.model,
+            "provider": "GEMINI",
+            "is_live": True,
+            "overall_risk_level": "SYNTHETIC_FLAGS_PRESENT" if selected and selected.legal_risks else "NOT_ASSESSED",
+            "investigation_report": report,
+        }
 
     def _select_land(
         self, query: str, available_lands: List[LandListing], selected_land_id: Optional[str]
@@ -608,10 +634,11 @@ class ReasoningService:
                 if location:
                     break
 
-        land_type = latest_match(
+        land_type_pattern = (
             r"\b(?:agricultural|agriculture|residential|commercial|industrial|"
             r"farm(?:ing)?|open\s+plot|plots?)\b(?:\s+land)?"
         )
+        land_type = latest_match(land_type_pattern)
         acreage = latest_match(
             r"\b\d+(?:\.\d+)?(?:\s*(?:to|-|–)\s*\d+(?:\.\d+)?)?\s*"
             r"(?:acres?|ac|ఎకరాలు|ఎకరం|ఎకరాల)\b"
@@ -751,10 +778,18 @@ class ReasoningService:
         ):
             broker_statements.append(current_answer)
         broker_statements = list(dict.fromkeys(broker_statements))[-5:]
+        broker_land_type = next(
+            (
+                match.group(0).strip()
+                for statement in reversed(broker_statements)
+                if (match := re.search(land_type_pattern, statement, re.IGNORECASE))
+            ),
+            None,
+        )
         documents = [
             message for message in user_messages
             if re.search(
-                r"\b(?:documents?|deeds?|patta|papers?|encumbrance|survey)\b|"
+                r"\b(?:documents?|deeds?|patta|papers?|encumbrance)\b|"
                 r"\btitle\s+(?:deed|documents?|papers?|records?|chain)\b",
                 message,
                 re.IGNORECASE,
@@ -821,6 +856,15 @@ class ReasoningService:
             current_answer,
             re.IGNORECASE,
         ))
+        buyer_context_complete = bool(
+            budget and documents and concerns and land_type and acreage
+        )
+        survey_missing = not survey_reference and not survey_answered_without_number
+        broker_claims_clear_title = any(
+            re.search(r"\b(?:clear\s+title|title\s+is\s+clear)\b", statement, re.IGNORECASE)
+            for statement in broker_statements
+        )
+
         if not buying_intent:
             next_missing_detail = None
         elif not location:
@@ -829,14 +873,20 @@ class ReasoningService:
             next_missing_detail = "whether the buyer has already approached a broker"
         elif broker_status == "YES" and not broker_statements:
             next_missing_detail = "what the broker said about the parcel"
-        elif broker_status == "YES" and not survey_reference and not survey_answered_without_number:
-            next_missing_detail = "the village and survey/subdivision number, if known"
+        elif broker_status == "YES" and buyer_context_complete:
+            next_missing_detail = None
+        elif broker_status == "YES" and survey_missing:
+            next_missing_detail = (
+                "whether the broker supplied documents or a survey number"
+                if broker_claims_clear_title and not documents
+                else "the village and survey/subdivision number, if known"
+            )
         elif broker_status == "YES" and not acreage:
             next_missing_detail = "the parcel area"
         elif broker_status == "YES" and not asking_price_per_acre and not budget:
             next_missing_detail = "the broker's quoted total or per-acre price"
-        elif broker_status == "YES" and not land_type:
-            next_missing_detail = "the stated land type"
+        elif broker_status == "YES" and not broker_land_type:
+            next_missing_detail = "land type"
         elif broker_status == "YES" and not document_analyses and not documents and not document_answered_without_upload:
             next_missing_detail = "the documents the broker supplied, if any"
         elif broker_status == "NO" and not land_type:
@@ -854,6 +904,7 @@ class ReasoningService:
             "buying_intent": buying_intent,
             "preferred_location": location,
             "land_type": land_type,
+            "broker_land_type": broker_land_type,
             "acreage": acreage,
             "budget": budget,
             "asking_price_per_acre": asking_price_per_acre,
@@ -866,130 +917,6 @@ class ReasoningService:
             "buyer_preferences": buyer_preferences,
             "intended_purpose": intended_purpose,
             "next_missing_detail": next_missing_detail,
-        }
-
-    async def _run_evon_reasoning(
-        self,
-        query: str,
-        language: str,
-        lands: List[LandListing],
-        land_id: Optional[str],
-        conversation_history: Optional[List[Dict[str, str]]] = None,
-        document_analyses: Optional[List[Dict[str, Any]]] = None,
-        endpoint: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        endpoint = endpoint or self._endpoint_url()
-        if endpoint is None:
-            raise ProviderUnavailableError(
-                "Evon reasoning is not configured. Set EVON_API_BASE_URL and EVON_MODEL for an Evon vLLM-compatible inference endpoint."
-            )
-        selected = self._select_land(query, lands, land_id)
-        prompt = {
-            "query": query,
-            "conversation_history": [
-                {"role": item["role"], "content": item["content"]}
-                for item in (conversation_history or [])
-                if item.get("role") in {"user", "assistant"}
-                and isinstance(item.get("content"), str)
-            ],
-            "buyer_context": self._build_buyer_context(
-                query, conversation_history, document_analyses
-            ),
-            "conversation_language": language,
-            "selected_land": selected.model_dump(mode="json") if selected else None,
-            "document_analyses": document_analyses or [],
-            "verified_listing_source_available": False,
-        }
-        language_names = {
-            "en": "English",
-            "te": "Telugu",
-            "hi": "Hindi",
-            "mr": "Marathi",
-            "ta": "Tamil",
-            "kn": "Kannada",
-            "ml": "Malayalam",
-            "bn": "Bengali",
-            "gu": "Gujarati",
-            "pa": "Punjabi",
-        }
-        language_name = language_names.get(language, "English")
-        system_message = (
-            f"You are Bhoomi, a careful land-buying advisor. Reply in {language_name} only, "
-            "regardless of the languages used in earlier turns. Use the supplied conversation as "
-            "the continuing conversation and remember the buyer requirements, broker statements, "
-            "documents, preferences, and concerns in buyer_context. Do not ask again for facts already "
-            "provided. Answer a direct question first; otherwise ask only the single next missing detail. "
-            "Treat documents as user-provided text-pattern scans, not proof of authenticity or legal status. "
-            "Do not greet again on follow-up turns. Treat all included listing information as synthetic "
-            "demonstration data, never official records. Do not claim ownership, clear title, government "
-            "verification, current infrastructure status, or real listing availability. Explain uncertainty, "
-            "identify missing information, and recommend independent official verification. Compare only "
-            "property facts explicitly supplied by the user, and do not invent facts."
-        )
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
-            ],
-            "max_tokens": 2048,
-            "temperature": 0.6,
-            "top_p": 0.95,
-            "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-        try:
-            async with httpx.AsyncClient(timeout=settings.api_timeout_seconds) as client:
-                response = await client.post(endpoint, json=payload)
-        except httpx.TimeoutException as exc:
-            raise ProviderUnavailableError("Evon inference timed out.") from exc
-        except httpx.HTTPError as exc:
-            logger.warning("Evon inference endpoint could not be reached.")
-            raise ProviderUnavailableError(
-                "Evon inference endpoint could not be reached. Check EVON_API_BASE_URL and the deployment."
-            ) from exc
-
-        if response.status_code != 200:
-            logger.warning("Evon inference endpoint returned HTTP %s.", response.status_code)
-            raise ProviderRequestError(
-                f"Evon inference endpoint rejected the request (HTTP {response.status_code}). "
-                "Check EVON_MODEL and the configured deployment."
-            )
-        try:
-            choices = response.json()["choices"]
-            text = choices[0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderRequestError(
-                "Evon inference returned an invalid OpenAI-compatible chat-completion response."
-            ) from exc
-        if not isinstance(text, str) or not text.strip():
-            raise ProviderRequestError("Evon inference returned an empty response.")
-
-        dialogue = [CharacterSpeechItem(
-            character="bhoomi",
-            character_name="Bhoomi",
-            role="Land-buying advisor",
-            text=text.strip(),
-            voice_id="",
-            evidence_badge="User-provided conversation and synthetic demo records",
-            evidence_type="USER_PROVIDED_AND_SYNTHETIC_DEMONSTRATION_DATA",
-            sentiment="welcoming",
-            animation_cue="explain",
-        ).model_dump()]
-        return {
-            "user_query": query,
-            "conversation_language": language,
-            "matched_land_ids": [selected.id] if selected else [],
-            "dialogue_sequence": dialogue,
-            "model_used": self.model,
-            "provider": "GNANI_EVON",
-            "is_live": True,
-            "overall_risk_level": (
-                "SYNTHETIC_FLAGS_PRESENT" if selected and selected.legal_risks else "NOT_ASSESSED"
-            ),
-            "investigation_report": self._build_case_report(
-                query, conversation_history, selected, document_analyses
-            ),
         }
 
     async def reason(
@@ -1008,11 +935,8 @@ class ReasoningService:
             "legal_warnings": [item["text"] for item in dialogue if item["character"] == "nyaya"],
             "infrastructure_findings": [item["text"] for item in dialogue if item["character"] == "infra"],
             "growth_insights": [item["text"] for item in dialogue if item["character"] == "bhoomi"],
-            "ai_mode": (
-                f"{investigation['provider']} ({investigation['model_used']})"
-                if investigation["is_live"] else "SYNTHETIC DEMO MODE"
-            ),
+            "ai_mode": f"{investigation['provider']} ({investigation['model_used']})",
         }
 
 
-evon_service = ReasoningService()
+reasoning_service = ReasoningService()

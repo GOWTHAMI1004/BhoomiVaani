@@ -8,6 +8,79 @@ export interface Coordinates {
   lng: number;
 }
 
+export type ProvenanceClassification =
+  | 'USER_PROVIDED'
+  | 'BROKER_PROVIDED'
+  | 'EXTERNAL_SOURCE'
+  | 'OFFICIALLY_VERIFIED'
+  | 'AI_ESTIMATED'
+  | 'SYNTHETIC_DEMONSTRATION'
+  | 'UNKNOWN';
+
+export interface DataProvenance {
+  classification: ProvenanceClassification;
+  source_label: string;
+  source_url?: string | null;
+  last_updated?: string | null;
+  evidence_references: string[];
+}
+
+export type LandSearchSource = 'demo' | 'live';
+export interface LandSearchFilters {
+  district?: string;
+  min_acres?: number;
+  max_acres?: number;
+  max_budget_lakhs?: number;
+  land_type?: string;
+  legal_status?: string;
+  search?: string;
+}
+export type ProviderAvailability =
+  | 'CONFIGURED_AVAILABLE'
+  | 'CONFIGURED_UNAVAILABLE'
+  | 'NOT_CONFIGURED'
+  | 'DEMONSTRATION_DATA_ONLY';
+export type VerificationStatus =
+  | 'NOT_VERIFIED'
+  | 'SOURCE_RECORDED'
+  | 'INDEPENDENTLY_VERIFIED'
+  | 'NOT_APPLICABLE';
+export type CoordinatePrecision = 'PARCEL' | 'ADDRESS' | 'LOCALITY' | 'APPROXIMATE' | 'UNKNOWN';
+export type PermissionStatus = 'ALLOWED' | 'REQUIRES_ATTRIBUTION' | 'NOT_CONFIRMED' | 'NOT_ALLOWED';
+
+export interface ProviderUsageMetadata {
+  display_permission: PermissionStatus;
+  retention_permission: PermissionStatus;
+  retention_ttl_seconds?: number | null;
+  terms_reference?: string | null;
+}
+
+export interface NormalizedProviderRecord<T = Record<string, unknown>> {
+  provider_name: string;
+  provider_record_id: string;
+  data: T;
+  source_url?: string | null;
+  retrieval_timestamp: string;
+  provenance_classification: ProvenanceClassification;
+  verification_status: VerificationStatus;
+  coordinate_precision: CoordinatePrecision;
+  attribution_requirements: string[];
+  permitted_usage: ProviderUsageMetadata;
+}
+
+export interface ProviderStatus {
+  provider_type: string;
+  provider_name?: string | null;
+  availability: ProviderAvailability;
+  credentials_configured: boolean;
+  message: string;
+}
+
+export interface LandProvidersStatus {
+  providers: Record<string, ProviderStatus>;
+  demonstration_record_count: number;
+}
+
 export interface LegalRiskItem {
   risk_type: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
@@ -41,6 +114,8 @@ export interface LandListing {
   image_url: string;
   description: string;
   coordinates: Coordinates;
+  record_provenance?: DataProvenance;
+  field_provenance?: Record<string, DataProvenance>;
 }
 
 export interface LandStats {
