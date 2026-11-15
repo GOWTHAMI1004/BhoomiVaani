@@ -4,14 +4,15 @@
 
 ## Live lip-sync adapter
 
-MuseTalk 1.5 is the selected lip-sync engine candidate. The project does not include its weights, FFmpeg, CUDA environment, or an HTTP server, so configure a separately deployed MuseTalk-compatible GPU adapter with `LIPSYNC_API_URL`. Optional `LIPSYNC_API_KEY` is sent as a Bearer token. The adapter must implement this BhoomiVaani contract:
+MuseTalk 1.5 is the selected lip-sync engine candidate. The project does not include its weights, FFmpeg, CUDA environment, or an HTTP server, so configure a separately deployed MuseTalk-compatible GPU adapter with `LIPSYNC_API_URL`. When set, `LIPSYNC_API_KEY` is sent in the `X-API-Key` header. The adapter must implement this BhoomiVaani contract:
 
-- `POST` to the exact URL in `LIPSYNC_API_URL`.
+- `GET /health` for availability and `POST` to the exact URL in `LIPSYNC_API_URL`.
+- Authenticate with the backend-only `X-API-Key` header when `LIPSYNC_API_KEY` is set.
 - Multipart fields `video_file` (the original Flow MP4) and `audio_file` (the generated Timbre WAV).
 - Return the completed synchronized video as `video/mp4`, including the supplied speech audio track.
 - Preserve the source identity and return only after the video is ready to play.
 
-The frontend only replaces the introduction frame with a returned clip after Timbre has generated audio. When the endpoint is not configured or fails, Bhoomi's original character stays visible and her generated audio remains playable, but live mouth synchronization is reported unavailable.
+The frontend only replaces the introduction frame with a returned clip after Timbre has generated audio. When the endpoint is not configured or fails, Bhoomi's original character stays visible and her generated audio remains playable, but live mouth synchronization is reported unavailable. The API contract returns a completed MP4 synchronously; queued job responses are rejected as unavailable rather than described as synchronized playback.
 
 MuseTalk's upstream README recommends 25 fps input (the supplied clip is 24 fps). It reports 30+ fps on an NVIDIA Tesla V100, while its Gradio demonstration reports that an 8-second clip may take about five minutes on an RTX 3050 Ti Laptop GPU with 4 GB VRAM in fp16. It documents Python 3.10, CUDA 11.7, FFmpeg, and additional model weights/dependencies. That means the upstream demo minimum is not evidence of low-latency production performance. Its code and model are described as MIT/commercially usable; licenses for bundled third-party weights/models remain separate. See the [MuseTalk upstream repository](https://github.com/TMElyralab/MuseTalk).
 

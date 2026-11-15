@@ -113,7 +113,9 @@ async def generate_bhoomi_lipsync(audio_file: UploadFile = File(...)):
 
     try:
         video_bytes = video_path.read_bytes()
-        headers = {"Authorization": f"Bearer {settings.lipsync_api_key}"} if settings.lipsync_api_key else {}
+        # MuseTalk deployment contract uses the backend-only X-API-Key header.
+        # Do not send credentials as Bearer tokens or expose them to the browser.
+        headers = {"X-API-Key": settings.lipsync_api_key} if settings.lipsync_api_key else {}
         async with httpx.AsyncClient(timeout=settings.api_timeout_seconds) as client:
             result = await client.post(
                 settings.lipsync_api_url,

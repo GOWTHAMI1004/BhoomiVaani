@@ -88,7 +88,7 @@ def test_lipsync_sends_source_and_generated_wav_to_adapter(monkeypatch, tmp_path
 
         async def post(self, url, *, headers, files):
             assert url == "https://configured-adapter.invalid/lipsync"
-            assert headers == {"Authorization": "Bearer adapter-test-secret"}
+            assert headers == {"X-API-Key": "adapter-test-secret"}
             assert files["video_file"][1] == original
             assert files["audio_file"][1].startswith(b"RIFF")
             return AdapterResponse()
